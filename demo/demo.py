@@ -1,8 +1,4 @@
-from utils.vis import vis_keypoints, vis_3d_multiple_skeleton
-from utils.pose_utils import process_bbox, pixel2cam
-from dataset import generate_patch_image
-from model import get_pose_net
-from config import cfg
+
 import sys
 import os
 import os.path as osp
@@ -10,16 +6,20 @@ import argparse
 import numpy as np
 import cv2
 import torch
-import pickle
 import tarfile
 import torchvision.transforms as transforms
 from torch.nn.parallel.data_parallel import DataParallel
 import torch.backends.cudnn as cudnn
 
+
 sys.path.insert(0, osp.join('..', 'main'))
 sys.path.insert(0, osp.join('..', 'data'))
 sys.path.insert(0, osp.join('..', 'common'))
-
+from config import cfg
+from model import get_pose_net
+from dataset import generate_patch_image
+from utils.pose_utils import process_bbox, pixel2cam
+from utils.vis import vis_keypoints, vis_3d_multiple_skeleton
 
 def parse_args():
     parser = argparse.ArgumentParser()
