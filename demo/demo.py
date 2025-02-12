@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import torch
 import tarfile
+import zipfile
 import torchvision.transforms as transforms
 from torch.nn.parallel.data_parallel import DataParallel
 import torch.backends.cudnn as cudnn
@@ -58,20 +59,20 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 
 # snapshot load
 model_path = 'ConvNeXtPose_XS.tar'
-with tarfile.open(model_path) as tar:
-    # Construir la ruta al archivo data.pkl dentro del snapshot
-    snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-    data_member_path = snapshot_folder + '/data.pkl'
+with zipfile.ZipFile(model_path) as zip:
+	# Build the path to the data.pkl file inside the snapshot
+	snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
+	data_member_path = snapshot_folder + '/data.pkl'
 
-    # Verificar que el miembro exista
-    try:
-        member = tar.getmember(data_member_path)
-    except KeyError:
-        raise FileNotFoundError('Archive not found: ' + data_member_path)
+	# Verify that the member exists
+	try:
+		info = zip.getinfo(data_member_path)
+	except KeyError:
+		raise FileNotFoundError('Archive not found: ' + data_member_path)
 
-    print('Load checkpoint from {}'.format(data_member_path))
-    data_file = tar.extractfile(member)
-    ckpt = torch.load(data_file)
+	print('Load checkpoint from {}'.format(data_member_path))
+	with zip.open(info) as data_file:
+		ckpt = torch.load(data_file)
 
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
