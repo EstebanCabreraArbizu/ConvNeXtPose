@@ -12,7 +12,12 @@ import tempfile
 import torchvision.transforms as transforms
 from torch.nn.parallel.data_parallel import DataParallel
 import torch.backends.cudnn as cudnn
-
+import pickle
+class CustomUnpickler(pickle.Unpickler):
+    def persistent_load(self, pid):
+        # Aquí se puede definir un comportamiento específico
+        # Si confías en el contenido, retorna pid sin modificaciones
+        return pid
 
 sys.path.insert(0, osp.join('..', 'main'))
 sys.path.insert(0, osp.join('..', 'data'))
@@ -77,7 +82,8 @@ with zipfile.ZipFile(model_path) as z:
 	with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
           tmp_file.write(data_file.read())
           tmp_file_path = tmp_file.name
-ckpt = torch.load(tmp_file_path)
+with open(tmp_file_path, "rb") as f:
+    ckpt = torch.load(f, pickle_module=CustomUnpickler)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
