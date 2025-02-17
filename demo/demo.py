@@ -80,7 +80,7 @@ with zipfile.ZipFile(model_path) as z:
         tmp_file_path = tmp_file.name
 
 with open(tmp_file_path, "rb") as f:
-    ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
+    ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda(), weights_only = True)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
