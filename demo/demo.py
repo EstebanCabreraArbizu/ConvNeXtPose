@@ -14,18 +14,6 @@ from torch.nn.parallel.data_parallel import DataParallel
 import torch.backends.cudnn as cudnn
 import pickle
 import types
-class CustomUnpickler(pickle.Unpickler):
-    def persistent_load(self, pid):
-        # Aquí se puede definir un comportamiento específico
-        # Si confías en el contenido, retorna pid sin modificaciones
-        return pid
-# Creamos un módulo personalizado que exponga CustomUnpickler como 'Unpickler'
-custom_pickle_module = types.ModuleType("custom_pickle_module")
-custom_pickle_module.Unpickler = CustomUnpickler
-custom_pickle_module.load = lambda f, **kwargs: CustomUnpickler(f).load()
-custom_pickle_module.dumps = pickle.dumps
-custom_pickle_module.loads = pickle.loads
-custom_pickle_module.Pickler = pickle.Pickler
 
 sys.path.insert(0, osp.join('..', 'main'))
 sys.path.insert(0, osp.join('..', 'data'))
@@ -74,24 +62,25 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 # snapshot load
 model_path = 'ConvNeXtPose_XS.tar'
 with zipfile.ZipFile(model_path) as z:
-     # Build the path to the data.pkl file inside the snapshot
-	snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-	data_member_path = snapshot_folder + '/data.pkl'
+    # Build the path to the data.pkl file inside the snapshot
+    snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
+    data_member_path = snapshot_folder + '/data.pkl'
 
-	# Verify that the member exists
-	try:
-		info = z.getinfo(data_member_path)
-	except KeyError:
-		raise FileNotFoundError('Archive not found: ' + data_member_path)
+    # Verify that the member exists
+    try:
+        info = z.getinfo(data_member_path)
+    except KeyError as exc:
+        raise FileNotFoundError('Archive not found: ' + data_member_path) from exc
 
-	print('Load checkpoint from {}'.format(data_member_path))
-	data_file = z.open(data_member_path)
-     # Escribimos el contenido en un archivo temporal
-	with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-          tmp_file.write(data_file.read())
-          tmp_file_path = tmp_file.name
+    print('Load checkpoint from {}'.format(data_member_path))
+    data_file = z.open(data_member_path)
+    # Write content to a temporary file
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        tmp_file.write(data_file.read())
+        tmp_file_path = tmp_file.name
+
 with open(tmp_file_path, "rb") as f:
-	    ckpt = torch.load(f, pickle_module = custom_pickle_module)
+    ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
