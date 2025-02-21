@@ -5,6 +5,7 @@ import os.path as osp
 import argparse
 import numpy as np
 import cv2
+import shutil
 import torch
 import tarfile
 import zipfile
@@ -76,10 +77,18 @@ with zipfile.ZipFile(model_path) as z:
 
 # Construir la ruta completa al checkpoint extraído
 # Suponiendo que el checkpoint extraído es un archivo ZIP interno que torch.load puede interpretar
-checkpoint_full_path = os.path.join(tmp_dir, checkpoint_folder)
+extracted_checkpoint_dir = os.path.join(tmp_dir, checkpoint_folder)
 # Cargar el checkpoint completo (que contiene data, version, etc.) con torch.load
+# Reempaquetar la carpeta extraída en un único archivo .pth (zip)
+repacked_checkpoint_path = os.path.join(tmp_dir, f'temp_checkpoint.pth')
+# shutil.make_archive crea un ZIP; le quitamos la extensión .zip y luego renombramos el archivo resultante
+archive_base = repacked_checkpoint_path[:-4]  # quita ".pth"
+shutil.make_archive(archive_base, 'zip', extracted_checkpoint_dir)
+# El archivo generado se llamará archive_base + '.zip'. Lo renombramos a .pth
+os.rename(archive_base + '.zip', repacked_checkpoint_path)
 
-with open(checkpoint_full_path, "rb") as f:
+
+with open(repacked_checkpoint_path, "rb") as f:
     ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 model_path = 'snapshot_68.pth'
