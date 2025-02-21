@@ -64,28 +64,24 @@ model_path = 'ConvNeXtPose_XS.tar'
 with zipfile.ZipFile(model_path) as z:
     # Build the path to the data.pkl file inside the snapshot
     snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-    data_member_path = snapshot_folder + '/data.pkl'
+    data_member_path = f'{snapshot_folder}/data.pkl'
 
     # Verify that the member exists
-    try:
-        info = z.getinfo(data_member_path)
-    except KeyError as exc:
-        raise FileNotFoundError('Archive not found: ' + data_member_path) from exc
-
-    print('Load checkpoint from {}'.format(data_member_path))
-    data_file = z.open(data_member_path)
-    # Write content to a temporary file
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        tmp_file.write(data_file.read())
-        tmp_file_path = tmp_file.name
+    if data_member_path not in z.namelist():
+        raise FileNotFoundError(f'Archivo {data_member_path} no encontrado en {model_path}')
+    with z.open(data_member_path) as data_file:
+        with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+            tmp_file.write(data_file.read())
+            tmp_file_path = tmp_file.name
 
 with open(tmp_file_path, "rb") as f:
     ckpt = torch.load(f)
+
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
 model.eval()
-
+print("Modelo cargado exitosamente")
 # prepare input image
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(
     mean=cfg.pixel_mean, std=cfg.pixel_std)])
