@@ -64,7 +64,7 @@ model_path = 'ConvNeXtPose_XS.tar'
 with zipfile.ZipFile(model_path) as z:
     # Build the path to the data.pkl file inside the snapshot
     snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-    data_member_path = f'{snapshot_folder}'
+    data_member_path = f'{snapshot_folder}/data.pkl'
 
     # Verify that the member exists
     if data_member_path not in z.namelist():
@@ -75,8 +75,11 @@ with zipfile.ZipFile(model_path) as z:
             tmp_file_path = tmp_file.name
 
 with open(tmp_file_path, "rb") as f:
-    ckpt = torch.load(f)
-
+    ckpt = pickle.load(f)
+#Guardar en un snapshot el modelo
+model_path = 'snapshot_68.pth'
+torch.save(ckpt, model_path)
+torch.load(model_path)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
