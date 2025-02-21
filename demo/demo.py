@@ -64,7 +64,7 @@ model_path = 'ConvNeXtPose_XS.tar'
 with zipfile.ZipFile(model_path) as z:
     # Build the path to the data.pkl file inside the snapshot
     snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-    data_member_path = f'{snapshot_folder}/data.pkl'
+    data_member_path = f'{snapshot_folder}'
 
     # Verify that the member exists
     if data_member_path not in z.namelist():
