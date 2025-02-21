@@ -75,7 +75,7 @@ with zipfile.ZipFile(model_path) as z:
             tmp_file_path = tmp_file.name
 
 with open(tmp_file_path, "rb") as f:
-    ckpt = pickle.load(f)
+    ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 model_path = 'snapshot_68.pth'
 torch.save(ckpt, model_path)
