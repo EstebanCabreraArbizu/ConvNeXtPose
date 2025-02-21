@@ -61,15 +61,13 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 
 # snapshot load
 model_path = 'ConvNeXtPose_XS.tar'
+test_epoch = int(args.test_epoch)
+checkpoint_member = f'snapshot_{test_epoch}.pth'
 with zipfile.ZipFile(model_path) as z:
-    # Build the path to the data.pkl file inside the snapshot
-    snapshot_folder = 'snapshot_%d.pth' % int(args.test_epoch)
-    data_member_path = f'{snapshot_folder}/data.pkl'
-
     # Verify that the member exists
-    if data_member_path not in z.namelist():
-        raise FileNotFoundError(f'Archivo {data_member_path} no encontrado en {model_path}')
-    with z.open(data_member_path) as data_file:
+    if checkpoint_member not in z.namelist():
+        raise FileNotFoundError(f'Archivo {checkpoint_member} no encontrado en {model_path}')
+    with z.open(checkpoint_member) as data_file:
         with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
             tmp_file.write(data_file.read())
             tmp_file_path = tmp_file.name
