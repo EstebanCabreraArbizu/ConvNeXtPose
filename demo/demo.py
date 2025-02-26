@@ -80,7 +80,8 @@ with zipfile.ZipFile(model_path) as z:
 extracted_checkpoint_dir = os.path.join(tmp_dir, checkpoint_folder)
 # Cargar el checkpoint completo (que contiene data, version, etc.) con torch.load
 # Reempaquetar la carpeta extraída en un único archivo .pth (zip)
-repacked_checkpoint_path = os.path.join(tmp_dir, f'temp_checkpoint.pth')
+repacked_checkpoint_path = os.path.join(tmp_dir, 'temp_checkpoint.pth')
+print(zipfile.ZipFile(repacked_checkpoint_path).namelist())
 # shutil.make_archive crea un ZIP; le quitamos la extensión .zip y luego renombramos el archivo resultante
 archive_base = repacked_checkpoint_path[:-4]  # quita ".pth"
 shutil.make_archive(archive_base, 'zip', extracted_checkpoint_dir)
