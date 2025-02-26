@@ -63,7 +63,7 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 # snapshot load
 model_path = 'ConvNeXtPose_XS.tar'
 test_epoch = int(args.test_epoch)
-checkpoint_filename = f'snapshot_{test_epoch}.pth/'
+checkpoint_filename = f'snapshot_{test_epoch}.pth'
 with zipfile.ZipFile(model_path) as z:
     # Verify that the member exists
     # Lista los miembros que pertenecen al checkpoint completo
