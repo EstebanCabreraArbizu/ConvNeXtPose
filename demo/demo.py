@@ -84,10 +84,11 @@ repacked_checkpoint_path = os.path.join(tmp_dir, 'temp_checkpoint.pth')
 print(zipfile.ZipFile(repacked_checkpoint_path).namelist())
 # shutil.make_archive crea un ZIP; le quitamos la extensión .zip y luego renombramos el archivo resultante
 archive_base = repacked_checkpoint_path[:-4]  # quita ".pth"
-shutil.make_archive(archive_base, 'zip', root_dir = extracted_checkpoint_dir, base_dir= "")
+shutil.make_archive(archive_base, 'zip', root_dir = extracted_checkpoint_dir, base_dir= ".")
 # El archivo generado se llamará archive_base + '.zip'. Lo renombramos a .pth
 os.rename(archive_base + '.zip', repacked_checkpoint_path)
 
+print(zipfile.ZipFile(repacked_checkpoint_path).namelist())
 
 with open(repacked_checkpoint_path, "rb") as f:
     ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
