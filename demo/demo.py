@@ -63,33 +63,25 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 # snapshot load
 model_path = 'ConvNeXtPose_XS.tar'
 test_epoch = int(args.test_epoch)
-checkpoint_folder = f'snapshot_{test_epoch}.pth/'
+checkpoint_filename = f'snapshot_{test_epoch}.pth/'
 with zipfile.ZipFile(model_path) as z:
     # Verify that the member exists
     # Lista los miembros que pertenecen al checkpoint completo
-    members = [m for m in z.namelist() if m.startswith(checkpoint_folder)]
+    members = [m for m in z.namelist() if m.startswith(checkpoint_filename)]
     if not members:
-        raise FileNotFoundError(f'Archivo {checkpoint_folder} no encontrado en {model_path}')
+        raise FileNotFoundError(f'Archivo {checkpoint_filename} no encontrado en {model_path}')
     # Crear un directorio temporal para extraer la carpeta completa
     tmp_dir = tempfile.mkdtemp()
-    # Extraer todos los miembros preservando la estructura
-    z.extractall(path=tmp_dir)
+    # Extraer únicamente el archivo checkpoint
+    z.extract(checkpoint_filename, path=tmp_dir)
 
 # Construir la ruta completa al checkpoint extraído
 # Suponiendo que el checkpoint extraído es un archivo ZIP interno que torch.load puede interpretar
-extracted_checkpoint_dir = os.path.join(tmp_dir, checkpoint_folder)
-# Cargar el checkpoint completo (que contiene data, version, etc.) con torch.load
-# Reempaquetar la carpeta extraída en un único archivo .pth (zip)
-repacked_checkpoint_path = os.path.join(tmp_dir, 'temp_checkpoint.pth')
-# shutil.make_archive crea un ZIP; le quitamos la extensión .zip y luego renombramos el archivo resultante
-archive_base = repacked_checkpoint_path[:-4]  # quita ".pth"
-shutil.make_archive(archive_base, 'zip', root_dir = extracted_checkpoint_dir, base_dir= ".")
-# El archivo generado se llamará archive_base + '.zip'. Lo renombramos a .pth
-os.rename(archive_base + '.zip', repacked_checkpoint_path)
+extracted_checkpoint_path = os.path.join(tmp_dir, checkpoint_filename)
+print(zipfile.ZipFile(extracted_checkpoint_path).namelist())
 
-print(zipfile.ZipFile(repacked_checkpoint_path).namelist())
 
-with open(repacked_checkpoint_path, "rb") as f:
+with open(extracted_checkpoint_path, "rb") as f:
     ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 model_path = 'snapshot_68.pth'
