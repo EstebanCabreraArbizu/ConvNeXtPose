@@ -1,6 +1,7 @@
 
 import sys
 import os
+import io
 import os.path as osp
 import argparse
 import numpy as np
@@ -64,24 +65,28 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 model_path = 'ConvNeXtPose_XS.tar'
 test_epoch = int(args.test_epoch)
 checkpoint_filename = f'snapshot_{test_epoch}.pth'
+tmp_dir = tempfile.mkdtemp()
 with zipfile.ZipFile(model_path) as z:
     # Verify that the member exists
     # Lista los miembros que pertenecen al checkpoint completo
     members = [m for m in z.namelist() if m.startswith(checkpoint_filename)]
     if not members:
         raise FileNotFoundError(f'Archivo {checkpoint_filename} no encontrado en {model_path}')
-    # Crear un directorio temporal para extraer la carpeta completa
-    tmp_dir = tempfile.mkdtemp()
-    # Extraer únicamente el archivo checkpoint
-    z.extract(checkpoint_filename, path=tmp_dir)
+    for member in members:
+	    z.extract(member, path = tmp_dir)
+bio = io.BytesIO()
+with zipfile.ZipFile(bio, 'w') as newzip:
+    for member in members:
+        filepath = os.path.join(tmp_dir, member)
+        with open(filepath, 'rb') as f:
+            data = f.read()
+        newname = member[len(checkpoint_filename)+1:]
+        newzip.writestr(newname, data)
+bio.seek(0)
+print(zipfile.ZipFile(bio).namelist())
 
-# Construir la ruta completa al checkpoint extraído
-# Suponiendo que el checkpoint extraído es un archivo ZIP interno que torch.load puede interpretar
-extracted_checkpoint_path = os.path.join(tmp_dir, checkpoint_filename)
-print(zipfile.ZipFile(extracted_checkpoint_path).namelist())
 
-
-with open(extracted_checkpoint_path, "rb") as f:
+with open(bio, "rb") as f:
     ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 model_path = 'snapshot_68.pth'
