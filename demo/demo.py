@@ -84,10 +84,7 @@ with zipfile.ZipFile(bio, 'w') as newzip:
         newzip.writestr(newname, data)
 bio.seek(0)
 print(zipfile.ZipFile(bio).namelist())
-
-
-with open(bio, "rb") as f:
-    ckpt = torch.load(f, map_location=lambda storage, loc: storage.cuda())
+ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 model_path = 'snapshot_68.pth'
 torch.save(ckpt, model_path)
