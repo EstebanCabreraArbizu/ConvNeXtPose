@@ -74,21 +74,14 @@ with zipfile.ZipFile(model_path) as z:
         raise FileNotFoundError(f'Archivo {checkpoint_filename} no encontrado en {model_path}')
     for member in members:
 	    z.extract(member, path = tmp_dir)
-bio = io.BytesIO()
-with zipfile.ZipFile(bio, 'w') as newzip:
-    for member in members:
-        filepath = os.path.join(tmp_dir, member)
-        with open(filepath, 'rb') as f:
-            data = f.read()
-        newname = member[len(checkpoint_filename)+1:]
-        newzip.writestr(newname, data)
-bio.seek(0)
-print(zipfile.ZipFile(bio).namelist())
-ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
+        
+extracted_checkpoint_path = os.path.join(tmp_dir, checkpoint_filename)
+print(f'Archivo extraído: {extracted_checkpoint_path}')
+ckpt = torch.load(extracted_checkpoint_path, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
-model_path = 'snapshot_68.pth'
-torch.save(ckpt, model_path)
-torch.load(model_path)
+# model_path_out = 'snapshot_68.pth'
+# torch.save(ckpt, model_path_out)
+# torch.load(model_path_out)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
