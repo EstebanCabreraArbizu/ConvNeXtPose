@@ -62,22 +62,10 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
             (11, 12), (12, 13), (13, 20), (1, 2), (2, 3), (3, 4), (4, 17), (1, 5), (5, 6), (6, 7), (7, 18))
 
 # snapshot load
-model_path = 'ConvNeXtPose_XS.tar'
 test_epoch = int(args.test_epoch)
-checkpoint_filename = f'snapshot_{test_epoch}.pth'
-tmp_dir = tempfile.mkdtemp()
-with zipfile.ZipFile(model_path) as z:
-    # Verify that the member exists
-    # Lista los miembros que pertenecen al checkpoint completo
-    members = [m for m in z.namelist() if m.startswith(checkpoint_filename)]
-    if not members:
-        raise FileNotFoundError(f'Archivo {checkpoint_filename} no encontrado en {model_path}')
-    for member in members:
-	    z.extract(member, path = tmp_dir)
-        
-extracted_checkpoint_path = os.path.join(tmp_dir, checkpoint_filename)
-print(f'Archivo extraído: {extracted_checkpoint_path}')
-ckpt = torch.load(extracted_checkpoint_path, map_location=lambda storage, loc: storage.cuda())
+model_path = f'snapshot_{test_epoch}.pth'
+
+ckpt = torch.load(model_path, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 # model_path_out = 'snapshot_68.pth'
 # torch.save(ckpt, model_path_out)
