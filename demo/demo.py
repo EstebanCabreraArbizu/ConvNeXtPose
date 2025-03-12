@@ -63,9 +63,34 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 
 # snapshot load
 test_epoch = int(args.test_epoch)
-model_path = f'snapshot_{test_epoch}.pth'
+model_path = 'demo/ConvNeXtPose_XS.tar'
+checkpoint_filename = f'snapshot_{test_epoch}.pth'
+# Crear un directorio temporal para extraer el checkpoint completo
+tmp_dir = tempfile.mkdtemp()
 
-ckpt = torch.load(model_path, map_location=lambda storage, loc: storage.cuda())
+with zipfile.ZipFile(model_path) as z:
+    members = [m for m in z.namelist() if m.startswith(checkpoint_filename)]
+    if not members:
+        raise FileNotFoundError(f'No se encontró ningún archivo que comience con "{checkpoint_filename}" en {model_path}')
+    for member in members:
+        z.extract(member, path = tmp_dir)
+bio = io.BytesIO()
+with zipfile.ZipFile(bio, 'w') as newzip:
+    for member in members:
+        # Lee el contenido del archivo extraído
+        file_path = os.path.join(tmp_dir, member)
+        with open(file_path, 'rb') as f:
+            data = f.read()
+        prefix = f"{checkpoint_filename}/"
+        if member.startswith(prefix):
+            newname = member[len(prefix):]  # newname = os.path.relpath(member, checkpoint_filename)
+        else: 
+            newname = member
+        # Remueve el prefijo "snapshot_68.pth/" del nombre interno
+        print(f"Empaquetando: {member} como {newname}")  # Verifica los nombres
+        newzip.writestr(newname, data)
+bio.seek(0)
+ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
 #Guardar en un snapshot el modelo
 # model_path_out = 'snapshot_68.pth'
 # torch.save(ckpt, model_path_out)
