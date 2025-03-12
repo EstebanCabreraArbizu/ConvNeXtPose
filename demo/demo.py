@@ -63,7 +63,7 @@ skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 
 
 # snapshot load
 test_epoch = int(args.test_epoch)
-model_path = 'demo/ConvNeXtPose_XS.tar'
+model_path = 'ConvNeXtPose_XS.tar'
 checkpoint_filename = f'snapshot_{test_epoch}.pth'
 # Crear un directorio temporal para extraer el checkpoint completo
 tmp_dir = tempfile.mkdtemp()
