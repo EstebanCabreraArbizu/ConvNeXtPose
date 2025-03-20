@@ -33,7 +33,7 @@ with zipfile.ZipFile(bio, 'w') as newzip:
             data = f.read()
         prefix = f"{checkpoint_filename}/"
         if member.startswith(prefix):
-            newname = member[len(prefix):]  # newname = os.path.relpath(member, checkpoint_filename)
+            newname = 'archive/'+ member[len(prefix):]  # newname = os.path.relpath(member, checkpoint_filename)
         else: 
             newname = member
         # Remueve el prefijo "snapshot_68.pth/" del nombre interno
