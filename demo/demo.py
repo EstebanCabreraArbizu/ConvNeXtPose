@@ -53,7 +53,7 @@ cfg.set_args(args.gpu_ids)
 cudnn.benchmark = True
 
 # MuCo joint set
-joint_num = 21
+joint_num = 18 #21
 joints_name = ('Head_top', 'Thorax', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'L_Shoulder', 'L_Elbow', 'L_Wrist', 'R_Hip',
                'R_Knee', 'R_Ankle', 'L_Hip', 'L_Knee', 'L_Ankle', 'Pelvis', 'Spine', 'Head', 'R_Hand', 'L_Hand', 'R_Toe', 'L_Toe')
 flip_pairs = ((2, 5), (3, 6), (4, 7), (8, 11),
@@ -91,13 +91,9 @@ with zipfile.ZipFile(bio, 'w') as newzip:
         newzip.writestr(newname, data)
 bio.seek(0)
 ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
-#Guardar en un snapshot el modelo
-# model_path_out = 'snapshot_68.pth'
-# torch.save(ckpt, model_path_out)
-# torch.load(model_path_out)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
-model.load_state_dict(ckpt['network'])
+model.load_state_dict(ckpt['network']) # strict: False
 model.eval()
 print("Modelo cargado exitosamente")
 # prepare input image
