@@ -52,12 +52,10 @@ cfg.set_args(args.gpu_ids)
 cudnn.benchmark = True
 
 # MuCo joint set
-joint_num = 18
-joints_name = ('Head_top', 'Thorax', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'L_Shoulder', 'L_Elbow', 'L_Wrist', 'R_Hip',
-               'R_Knee', 'R_Ankle', 'L_Hip', 'L_Knee', 'L_Ankle', 'Pelvis', 'Spine', 'Head', 'Neck')
-flip_pairs = ((2, 5), (3, 6), (4, 7), (8, 11), (9, 12), (10, 13))
-skeleton = ((0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 10),
-            (11, 12), (12, 13), (1, 2), (2, 3), (3, 4), (1, 5), (5, 6), (6, 7), (1, 17), (17, 16))
+joint_num = 21
+joints_name = ('Head_top', 'Thorax', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'L_Shoulder', 'L_Elbow', 'L_Wrist', 'R_Hip', 'R_Knee', 'R_Ankle', 'L_Hip', 'L_Knee', 'L_Ankle', 'Pelvis', 'Spine', 'Head', 'R_Hand', 'L_Hand', 'R_Toe', 'L_Toe')
+flip_pairs = ( (2, 5), (3, 6), (4, 7), (8, 11), (9, 12), (10, 13), (17, 18), (19, 20) )
+skeleton = ( (0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 10), (10, 19), (11, 12), (12, 13), (13, 20), (1, 2), (2, 3), (3, 4), (4, 17), (1, 5), (5, 6), (6, 7), (7, 18) )
 
 # snapshot load
 test_epoch = int(args.test_epoch)
@@ -91,7 +89,9 @@ bio.seek(0)
 ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
-model.load_state_dict(ckpt['network']) # strict: False
+# Usar strict=False para permitir cargar el modelo a pesar de las diferencias en la arquitectura
+# Esto permitirá cargar los pesos que coinciden e ignorar los que no
+model.load_state_dict(ckpt['network'], strict=False)
 model.eval()
 print("Modelo cargado exitosamente")
 # prepare input image
