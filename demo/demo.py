@@ -91,7 +91,7 @@ model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 # Usar strict=False para permitir cargar el modelo a pesar de las diferencias en la arquitectura
 # Esto permitirá cargar los pesos que coinciden e ignorar los que no
-model.load_state_dict(ckpt['network'], strict=False)
+model.load_state_dict(ckpt['network'])
 model.eval()
 print("Modelo cargado exitosamente")
 # prepare input image
