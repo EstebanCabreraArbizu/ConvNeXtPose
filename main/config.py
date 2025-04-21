@@ -45,9 +45,9 @@ class Config:
     batch_size = 32
     min_lr = 1e-6
     wd = 0.1
-    # backbone_cfg = ([3, 3, 9, 3], [48, 96, 192, 384])        
-    backbone_cfg = ([2, 2, 6, 2], [40, 80, 160, 320])        
-    depth = 128
+    backbone_cfg = ([3, 3, 9, 3], [48, 96, 192, 384])        
+    # backbone_cfg = ([2, 2, 6, 2], [40, 80, 160, 320])        
+    depth = 256
     warmup_epochs = 5
     save_interval = 1
 
