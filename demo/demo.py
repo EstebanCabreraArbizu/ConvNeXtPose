@@ -54,17 +54,17 @@ cudnn.benchmark = True
 # MuCo joint set
 joint_num = 18 # 21
 joints_name = ('Head_top', 'Thorax', 'R_Shoulder', 'R_Elbow', 'R_Wrist', 'L_Shoulder', 'L_Elbow', 'L_Wrist', 'R_Hip', 'R_Knee', 'R_Ankle', 'L_Hip', 'L_Knee', 'L_Ankle', 'Pelvis', 'Spine', 'Head', 'R_Hand'
-               #, 'L_Hand', 'R_Toe', 'L_Toe'
+               , 'L_Hand', 'R_Toe', 'L_Toe'
               )
 flip_pairs = ( (2, 5), (3, 6), (4, 7), (8, 11), (9, 12), (10, 13)
-              #, (17, 18), (19, 20) 
+              , (17, 18), (19, 20) 
              )
 skeleton = ( (0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 10)
-            #, (10, 19)
+            , (10, 19)
             , (11, 12), (12, 13)
-            #, (13, 20)
+            , (13, 20)
             , (1, 2), (2, 3), (3, 4), (4, 17), (1, 5), (5, 6), (6, 7)
-            #, (7, 18) 
+            , (7, 18) 
            )
 
 # snapshot load
