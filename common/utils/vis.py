@@ -46,7 +46,7 @@ def vis_keypoints(img, kps, full_skeleton, kp_thresh=0.4, alpha=1):
     return cv2.addWeighted(img, 1.0 - alpha, kp_mask, alpha, 0)
 
 def vis_3d_skeleton(kpt_3d, kpt_3d_vis, full_skeleton, filename=None):
-    joint_num = kps.shape[1]
+    joint_num = kpt_3d.shape[1]
     kps_lines = [
         (i,j) for (i,j) in full_skeleton
         if i < joint_num and j < joint_num
