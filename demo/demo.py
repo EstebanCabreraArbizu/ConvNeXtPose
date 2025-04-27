@@ -106,6 +106,8 @@ model.load_state_dict(ckpt['network'])
 model.eval()
 print("Modelo cargado exitosamente")
 sd = model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict()
+# Create export directory if it doesn't exist
+os.makedirs('export', exist_ok=True)
 torch.save({'network': sd}, os.path.join('export', 'model_opt.pth'))
 print("[INFO] State_dict exportado") 
 # prepare input image
