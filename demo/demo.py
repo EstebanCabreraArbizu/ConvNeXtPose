@@ -96,7 +96,8 @@ with zipfile.ZipFile(bio, 'w') as newzip:
         print(f"Empaquetando: {member} como {newname}")  # Verifica los nombres
         newzip.writestr(newname, data)
 bio.seek(0)
-ckpt = torch.load(bio, map_location=lambda storage, loc: storage.cuda())
+map_loc = (lambda s, l: s.cuda()) if args.gpu_ids else 'cpu'
+ckpt = torch.load(bio, map_location=map_loc)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
 # Usar strict=False para permitir cargar el modelo a pesar de las diferencias en la arquitectura
@@ -104,6 +105,9 @@ model = DataParallel(model).cuda()
 model.load_state_dict(ckpt['network'])
 model.eval()
 print("Modelo cargado exitosamente")
+sd = model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict()
+torch.save({'network': sd}, os.path.join('export', 'model_opt.pth'))
+print("[INFO] State_dict exportado") 
 # prepare input image
 transform = transforms.Compose([transforms.ToTensor(), transforms.Normalize(
     mean=cfg.pixel_mean, std=cfg.pixel_std)])

@@ -1,2 +1,4 @@
 snapshot/
 snapshots/
+pycaches/
+__pycache__/

@@ -69,18 +69,30 @@ class HeadNet(nn.Module):
 
 
 def soft_argmax(heatmaps, joint_num):
-
-    heatmaps = heatmaps.reshape((-1, joint_num, cfg.depth_dim*cfg.output_shape[0]*cfg.output_shape[1]))
-    heatmaps = F.softmax(heatmaps, 2)
-    heatmaps = heatmaps.reshape((-1, joint_num, cfg.depth_dim, cfg.output_shape[0], cfg.output_shape[1]))
-
+    device = heatmaps.device
+    
+    # Calculate actual output shape from the heatmap size
+    batch_size = heatmaps.shape[0]
+    channels = heatmaps.shape[1]
+    
+    # Ensure the output shape and depth_dim match the actual tensor size
+    actual_size = heatmaps.numel() // (batch_size * joint_num)
+    
+    # Dynamically calculate the output shape based on tensor size
+    depth_dim = cfg.depth_dim
+    h = heatmaps.shape[2] if len(heatmaps.shape) > 2 else cfg.output_shape[0]
+    w = heatmaps.shape[3] if len(heatmaps.shape) > 3 else cfg.output_shape[1]
+    
+    # Reshape based on actual dimensions
+    heatmaps = heatmaps.reshape((batch_size, joint_num, depth_dim, h, w))
+    
     accu_x = heatmaps.sum(dim=(2,3))
     accu_y = heatmaps.sum(dim=(2,4))
     accu_z = heatmaps.sum(dim=(3,4))
 
-    accu_x = accu_x * torch.arange(cfg.output_shape[1]).float().cuda()[None,None,:]
-    accu_y = accu_y * torch.arange(cfg.output_shape[0]).float().cuda()[None,None,:]
-    accu_z = accu_z * torch.arange(cfg.depth_dim).float().cuda()[None,None,:]
+    accu_x = accu_x * torch.arange(w).float().to(device)[None,None,:]
+    accu_y = accu_y * torch.arange(h).float().to(device)[None,None,:]
+    accu_z = accu_z * torch.arange(depth_dim).float().to(device)[None,None,:]
 
     accu_x = accu_x.sum(dim=2, keepdim=True)
     accu_y = accu_y.sum(dim=2, keepdim=True)
