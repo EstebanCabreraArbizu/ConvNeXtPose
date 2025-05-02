@@ -96,10 +96,10 @@ class ConvNeXt_BN(nn.Module):
 
     def forward(self, x):
         x_stage = []
-        for i in range(4):
-            x = self.downsample_layers[i](x)
-            x = self.stages[i](x)
-            if i < 3:
+        for idx, (down, stage) in enumerate(zip(self.downsample_layers, self.stages)):
+            x = down(x)
+            x = stage(x)
+            if idx < 3:
                 x_stage.append(x)
         return self.norm(x) # global average pooling, (N, C, H, W) -> (N, C)
 

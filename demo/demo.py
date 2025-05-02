@@ -16,9 +16,9 @@ import torch.backends.cudnn as cudnn
 import pickle
 import types
 
-sys.path.insert(0, osp.join('..', 'main'))
-sys.path.insert(0, osp.join('..', 'data'))
-sys.path.insert(0, osp.join('..', 'common'))
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.extend([str(ROOT/'main'), str(ROOT/'data'), str(ROOT/'common')])
+
 from config import cfg
 from model import get_pose_net
 from dataset import generate_patch_image
@@ -60,11 +60,11 @@ flip_pairs = ( (2, 5), (3, 6), (4, 7), (8, 11), (9, 12), (10, 13)
               , (17, 18), (19, 20) 
              )
 skeleton = ( (0, 16), (16, 1), (1, 15), (15, 14), (14, 8), (14, 11), (8, 9), (9, 10)
-            , (10, 19)
+            #, (10, 19)
             , (11, 12), (12, 13)
-            , (13, 20)
+            #, (13, 20)
             , (1, 2), (2, 3), (3, 4), (4, 17), (1, 5), (5, 6), (6, 7)
-            , (7, 18) 
+            #, (7, 18) 
            )
 
 # snapshot load
@@ -96,7 +96,7 @@ with zipfile.ZipFile(bio, 'w') as newzip:
         print(f"Empaquetando: {member} como {newname}")  # Verifica los nombres
         newzip.writestr(newname, data)
 bio.seek(0)
-map_loc = (lambda s, l: s.cuda()) if args.gpu_ids else 'cpu'
+map_loc = 'cuda' if torch.cuda.is_available() else 'cpu'
 ckpt = torch.load(bio, map_location=map_loc)
 model = get_pose_net(cfg, False, joint_num)
 model = DataParallel(model).cuda()
@@ -176,6 +176,7 @@ for n in range(person_num):
     vis_kps[1, :] = output_pose_2d_list[n][:, 1]
     vis_kps[2, :] = 1
     vis_img = vis_keypoints(vis_img, vis_kps, skeleton)
+
 cv2.imwrite('output_pose_2d.jpg', vis_img)
 
 # visualize 3d poses

@@ -48,7 +48,8 @@ def main():
             # forward
             trainer.optimizer.zero_grad()
             target = {'coord': joint_img, 'vis': joint_vis, 'have_depth': joints_have_depth}
-            loss_coord = trainer.model(input_img, target)
+            coords = trainer.model(input_img)
+            loss_coord = trainer.model.compute_loss(coords, target['coord'], target['vis'], target['have_depth'])
             loss_coord = loss_coord.mean()
 
             # backward
