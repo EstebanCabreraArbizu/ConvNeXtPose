@@ -2,3 +2,5 @@ snapshot/
 snapshots/
 pycaches/
 __pycache__/
+convnext_env/
+venv/
