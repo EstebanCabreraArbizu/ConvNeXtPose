@@ -4,3 +4,4 @@ pycaches/
 __pycache__/
 convnext_env/
 venv/
+.vscode/
