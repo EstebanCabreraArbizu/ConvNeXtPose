@@ -5,3 +5,7 @@ __pycache__/
 convnext_env/
 venv/
 .vscode/
+data/Human36M/annotations/
+data/Human36M/images/
+data/MPII/images/
+data/MPII/annotations/
