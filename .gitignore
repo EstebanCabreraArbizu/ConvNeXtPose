@@ -9,3 +9,6 @@ data/Human36M/annotations/
 data/Human36M/images/
 data/MPII/images/
 data/MPII/annotations/
+*.png
+*.jpg
+settings.json
