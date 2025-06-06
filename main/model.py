@@ -84,6 +84,13 @@ def soft_argmax(heatmaps: torch.Tensor,
     H_out, W_out = output_shape if (H != output_shape[0] or W != output_shape[1]) else (H, W)
     heat = heatmaps.view(B, joint_num, depth_dim, H_out, W_out)
     
+    # 🔥 AÑADIR SOLO ESTA NORMALIZACIÓN:
+    heat_flat = heat.view(B, joint_num, -1)  # [B, joint_num, depth*H*W]
+    heat_flat = heat_flat - heat_flat.min(dim=2, keepdim=True)[0]  # Hacer positivo
+    heat_soft = torch.softmax(heat_flat, dim=2)  # Aplicar softmax
+    heat = heat_soft.view(B, joint_num, depth_dim, H_out, W_out)  # Reshape back
+    # 🔥 FIN DE LA CORRECCIÓN
+    
     accu_x = heat.sum(dim=(2,3))
     accu_y = heat.sum(dim=(2,4))
     accu_z = heat.sum(dim=(3,4))

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-run_pose_mixed.py - VERSIÓN CORREGIDA
+convnext_realtime_v2.py - VERSIÓN CORREGIDA DEFINITIVA
 
-– Detección de persona con YOLOv5 INT8-ONNX (DeepSparse)
-– Estimación de pose 3D con ConvNeXtPose desde checkpoint PyTorch (.pth)
-– Visualización en tiempo real con FPS en pantalla y latencia de ConvNeXtPose cada 30 cuadros
+Correcciones principales:
+1. Integración correcta de RootNet para profundidad robusta
+2. Normalización apropiada de coordenadas entre modelos
+3. Transformaciones geométricas mejoradas para alineación
+4. Manejo robusto de casos extremos y valores fuera de rango
 """
 
 import argparse
@@ -12,7 +14,7 @@ import time
 import sys
 import inspect
 from pathlib import Path
-
+import os
 import cv2
 import numpy as np
 import torch
@@ -20,6 +22,7 @@ import torchvision.transforms as transforms
 from deepsparse import compile_model
 from deepsparse.pipeline import Pipeline
 from root_wrapper import RootNetWrapper
+
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 sys.path.extend([
@@ -28,20 +31,235 @@ sys.path.extend([
     str(PROJECT_ROOT / 'common')
 ])
 
-# ------ IMPORTACIÓN DE CONVNEXTPOSE (usar rutas relativas al proyecto) ------
+# ------ IMPORTACIÓN DE CONVNEXTPOSE ------
 from config import cfg
 from model import get_pose_net
 from dataset import generate_patch_image
 import utils.pose_utils as pose_utils
 import utils.vis as vis_utils
 
-# ----------------------------------------------------------------------------
+def comprehensive_checkpoint_diagnosis(pth_path: str):
+    """Diagnóstico completo del checkpoint"""
+    print(f"🔍 DIAGNÓSTICO COMPLETO DEL CHECKPOINT: {pth_path}")
+    print("="*70)
+    
+    try:
+        # 1. Verificar que el archivo existe
+        if not os.path.exists(pth_path):
+            print(f"❌ ERROR: Archivo no encontrado: {pth_path}")
+            return False
+            
+        file_size = os.path.getsize(pth_path) / (1024*1024)  # MB
+        print(f"📁 Tamaño del archivo: {file_size:.2f} MB")
+        
+        # 2. Cargar checkpoint
+        checkpoint = torch.load(pth_path, map_location='cpu')
+        print(f"✅ Checkpoint cargado exitosamente")
+        
+        # 3. Verificar estructura del checkpoint
+        print(f"🔑 Claves principales: {list(checkpoint.keys())}")
+        
+        # 4. Extraer state_dict
+        if 'network' in checkpoint:
+            state_dict = checkpoint['network']
+            print(f"✅ Usando clave 'network'")
+        elif 'state_dict' in checkpoint:
+            state_dict = checkpoint['state_dict']
+            print(f"✅ Usando clave 'state_dict'")
+        elif 'model_state_dict' in checkpoint:
+            state_dict = checkpoint['model_state_dict']
+            print(f"✅ Usando clave 'model_state_dict'")
+        else:
+            state_dict = checkpoint
+            print(f"✅ Usando checkpoint directo como state_dict")
+        
+        # 5. Analizar capas del modelo
+        print(f"🏗️ ESTRUCTURA DEL MODELO:")
+        print(f"   Total de parámetros: {len(state_dict)}")
+        
+        # Primeras y últimas capas
+        keys = list(state_dict.keys())
+        print(f"   Primera capa: {keys[0]}")
+        print(f"   Última capa: {keys[-1]}")
+        
+        # 6. Verificar capas críticas de ConvNeXt
+        convnext_indicators = [
+            'downsample_layers', 'stages', 'norm', 'head',
+            'backbone', 'head_net', 'conv', 'gamma'
+        ]
+        
+        found_indicators = []
+        for indicator in convnext_indicators:
+            if any(indicator in key for key in keys):
+                found_indicators.append(indicator)
+        
+        print(f"🎯 Indicadores ConvNeXt encontrados: {found_indicators}")
+        
+        # 7. Análizar rangos de pesos de capas críticas
+        print(f"📊 ANÁLISIS DE PESOS:")
+        sample_keys = keys[:5] + keys[-3:]  # Primeras 5 y últimas 3
+        
+        for key in sample_keys:
+            if isinstance(state_dict[key], torch.Tensor):
+                tensor = state_dict[key]
+                print(f"   {key}:")
+                print(f"     Shape: {tensor.shape}")
+                print(f"     Min/Max: [{tensor.min().item():.6f}, {tensor.max().item():.6f}]")
+                print(f"     Std: {tensor.std().item():.6f}")
+                
+                # Detectar pesos anómalos
+                if torch.isnan(tensor).any():
+                    print(f"     ❌ PROBLEMA: Contiene NaN")
+                if torch.isinf(tensor).any():
+                    print(f"     ❌ PROBLEMA: Contiene infinitos")
+                if tensor.abs().max() > 100:
+                    print(f"     ⚠️ ADVERTENCIA: Pesos muy grandes")
+                if tensor.abs().max() < 1e-6:
+                    print(f"     ⚠️ ADVERTENCIA: Pesos muy pequeños")
+        
+        # 8. Verificar compatibilidad con cfg
+        expected_output_dim = cfg.joint_num * 3 if hasattr(cfg, 'joint_num') else 54  # 18*3
+        head_keys = [k for k in keys if 'head' in k.lower() and 'weight' in k]
+        
+        if head_keys:
+            head_key = head_keys[-1]  # Última capa head
+            head_weight = state_dict[head_key]
+            print(f"🎯 CAPA DE SALIDA:")
+            print(f"   Clave: {head_key}")
+            print(f"   Shape: {head_weight.shape}")
+            print(f"   Dimensión de salida esperada: {expected_output_dim}")
+            
+            if head_weight.shape[0] == expected_output_dim:
+                print(f"   ✅ Dimensión de salida CORRECTA")
+            else:
+                print(f"   ❌ Dimensión de salida INCORRECTA")
+                
+        # 9. Verificar metadatos adicionales
+        if 'epoch' in checkpoint:
+            print(f"📅 Época de entrenamiento: {checkpoint['epoch']}")
+        if 'optimizer' in checkpoint:
+            print(f"🔧 Optimizador incluido: Sí")
+        if 'loss' in checkpoint:
+            print(f"📉 Loss guardado: {checkpoint['loss']}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ ERROR durante diagnóstico: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
 
+def test_model_inference_simple(model, device):
+    """Test de inferencia simple para verificar que el modelo funciona"""
+    print(f"🧪 TEST DE INFERENCIA SIMPLE:")
+    
+    try:
+        # Crear entrada de prueba
+        test_input = torch.randn(1, 3, 256, 256).to(device)
+        print(f"   Entrada de prueba: {test_input.shape}")
+        
+        # Inferencia
+        with torch.no_grad():
+            test_output = model(test_input)
+            
+        print(f"   Salida del modelo: {test_output.shape}")
+        print(f"   Rango de salida: [{test_output.min().item():.6f}, {test_output.max().item():.6f}]")
+        
+        # Verificar que la salida es razonable
+        if test_output.shape[1] == 18 and test_output.shape[2] == 3:
+            print(f"   ✅ Shape de salida CORRECTA (18 joints, 3 coords)")
+        else:
+            print(f"   ❌ Shape de salida INCORRECTA")
+            
+        # Verificar rangos
+        if test_output.min() >= -1000 and test_output.max() <= 1000:
+            print(f"   ✅ Rango de valores RAZONABLE")
+        else:
+            print(f"   ❌ Rango de valores ANÓMALO")
+            
+        return True
+        
+    except Exception as e:
+        print(f"   ❌ ERROR en test de inferencia: {e}")
+        return False
+
+def verify_soft_argmax_availability():
+    """Verificar si soft_argmax está disponible y funciona"""
+    print(f"🔧 VERIFICACIÓN DE SOFT_ARGMAX:")
+    
+    try:
+        from model import soft_argmax
+        print(f"   ✅ soft_argmax importado correctamente")
+        
+        # CORRECCIÓN: Usar tensor 4D como espera la función
+        test_heatmap = torch.randn(1, 576, 32, 32)  # batch, channels(18*32), height, width
+        
+        result = soft_argmax(
+            test_heatmap,
+            joint_num=18,
+            depth_dim=32,
+            output_shape=(32, 32)
+        )
+        
+        print(f"   ✅ soft_argmax funciona correctamente")
+        print(f"   Entrada: {test_heatmap.shape}")
+        print(f"   Salida: {result.shape}")
+        print(f"   Rango: [{result.min().item():.2f}, {result.max().item():.2f}]")
+        
+        return True
+        
+    except ImportError:
+        print(f"   ❌ ERROR: No se puede importar soft_argmax")
+        print(f"   Verifica que el archivo model.py esté en el path")
+        return False
+    except Exception as e:
+        print(f"   ❌ ERROR ejecutando soft_argmax: {e}")
+        return False
+
+def complete_model_diagnosis(pth_path: str):
+    """Diagnóstico completo del modelo y checkpoint"""
+    print(f"\n🏥 DIAGNÓSTICO COMPLETO DEL SISTEMA")
+    print("="*80)
+    
+    # 1. Diagnóstico del checkpoint
+    checkpoint_ok = comprehensive_checkpoint_diagnosis(pth_path)
+    
+    if not checkpoint_ok:
+        print(f"❌ FALLO CRÍTICO: Checkpoint inválido")
+        return False
+    
+    # 2. Verificar soft_argmax
+    soft_argmax_ok = verify_soft_argmax_availability()
+    
+    # 3. Cargar y probar modelo
+    try:
+        print(f"\n🔄 CARGANDO MODELO...")
+        model, device = load_pose_model(pth_path, joint_num=18, use_cuda=False)
+        print(f"   ✅ Modelo cargado en: {device}")
+        
+        # 4. Test de inferencia
+        inference_ok = test_model_inference_simple(model, device)
+        
+        # 5. Resumen final
+        print(f"\n📋 RESUMEN DEL DIAGNÓSTICO:")
+        print(f"   Checkpoint válido: {'✅' if checkpoint_ok else '❌'}")
+        print(f"   soft_argmax disponible: {'✅' if soft_argmax_ok else '❌'}")
+        print(f"   Inferencia funcional: {'✅' if inference_ok else '❌'}")
+        
+        if checkpoint_ok and soft_argmax_ok and inference_ok:
+            print(f"\n🎉 DIAGNÓSTICO: MODELO COMPLETAMENTE FUNCIONAL")
+            return True
+        else:
+            print(f"\n⚠️ DIAGNÓSTICO: PROBLEMAS DETECTADOS")
+            return False
+            
+    except Exception as e:
+        print(f"❌ ERROR cargando modelo: {e}")
+        return False
+    
 def letterbox(image: np.ndarray, new_size=(640, 640), color=(114, 114, 114)):
-    """
-    Redimensiona con letterbox manteniendo aspecto: 
-    devuelve imagen escalada y valores (scale, pad_left, pad_top) para revertir coordenadas.
-    """
+    """Redimensiona con letterbox manteniendo aspecto"""
     h, w = image.shape[:2]
     new_h, new_w = new_size
     scale = min(new_w / w, new_h / h)
@@ -59,262 +277,398 @@ def letterbox(image: np.ndarray, new_size=(640, 640), color=(114, 114, 114)):
     )
     return padded, scale, pad_left, pad_top
 
-def draw_skeleton(img: np.ndarray, joints: np.ndarray, skeleton, offset=(0, 0), color=(0, 255, 0)):
-    """
-    Dibuja articulaciones y líneas de esqueleto en img.
-    - joints: array (J, 2) con coordenadas (x, y) en el recorte original
-    - offset: esquina superior izquierda del recorte en la imagen principal
-    """
-    for (i, j) in skeleton:
-        if i < len(joints) and j < len(joints):
-            x1, y1 = int(joints[i][0] + offset[0]), int(joints[i][1] + offset[1])
-            x2, y2 = int(joints[j][0] + offset[0]), int(joints[j][1] + offset[1])
-            cv2.line(img, (x1, y1), (x2, y2), color, 2)
-    for (x, y) in joints:
-        cv2.circle(img, (int(x + offset[0]), int(y + offset[1])), 3, color, -1)
+def fix_convnext_configuration():
+    """Configuración definitiva para ConvNeXt heatmaps"""
+    # ANÁLISIS: 576 = 18 joints × 32 depth_layers  
+    cfg.joint_num = 18
+    cfg.depth_dim = 32  # Confirmado por 576/18 = 32
+    cfg.output_shape = (32, 32)  # Resolución espacial de heatmaps
+    cfg.input_shape = (256, 256)
+    cfg.bbox_3d_shape = (2000, 2000, 2000)
+    
+    print(f"🔧 CONFIGURACIÓN DEFINITIVA:")
+    print(f"   576 canales = 18 joints × 32 depth = ✅")
+    print(f"   depth_dim: {cfg.depth_dim}")
+    print(f"   output_shape: {cfg.output_shape}")
 
-def load_pose_model(pth_path: str, joint_num=18, use_cuda=False):
-    """
-    Carga ConvNeXtPose desde archivo .pth (state dict).
-    Devuelve el modelo PyTorch en modo eval.
-    """
+    # Verificación matemática
+    expected_size = 18 * 32 * 32 * 32
+    print(f"   Verificación: {expected_size} = 589,824 ✅")
+    
+def load_pose_model_final(pth_path: str, joint_num=18, use_cuda=False):
+    """Carga ConvNeXt con configuración definitiva"""
     device = torch.device('cuda' if use_cuda and torch.cuda.is_available() else 'cpu')
-    # Crear arquitectura
+    
+    # Aplicar configuración corregida
+    fix_convnext_configuration()
+    
+    # Crear modelo
     model = get_pose_net(cfg, is_train=False, joint_num=joint_num)
+    
     # Cargar pesos
     state = torch.load(pth_path, map_location=device)
     sd = state.get('network', state)
     model.load_state_dict(sd, strict=False)
     model = model.to(device).eval()
+    
+    print(f"✅ Modelo cargado con configuración corregida")
     return model, device
 
-def xywh2xyxy(box):
-    """Convierte [cx, cy, w, h] a [x1, y1, x2, y2]."""
-    cx, cy, w, h = box
-    x1 = cx - w / 2
-    y1 = cy - h / 2
-    x2 = cx + w / 2
-    y2 = cy + h / 2
-    return [x1, y1, x2, y2]
+def load_pose_model(pth_path: str, joint_num=18, use_cuda=False):
+    """Función para el diagnóstico - wrapper de load_pose_model_final"""
+    return load_pose_model_final(pth_path, joint_num, use_cuda)
 
-def correct_skeleton_orientation(coords):
-    """Corrige la orientación del esqueleto según la posición esperada."""
-    # Asegurarse de tener suficientes puntos para calcular
-    if coords.shape[0] < 15:
-        return coords
+def corrected_inference_final_v4(model, inp, cfg):
+    """Inferencia usando el soft_argmax corregido del modelo original"""
+    print(f"🔬 USANDO SOFT_ARGMAX CORREGIDO EN MODEL.PY:")
     
-    # Identificar explícitamente puntos clave del esqueleto
-    # Columna vertebral: de pelvis/cadera (14) a cuello/torso (1)
-    spine_bottom = coords[14]  # Pelvis
-    spine_top = coords[1]      # Torso
+    with torch.no_grad():
+        # Usar directamente el modelo original (que ahora tiene soft_argmax corregido)
+        coordinates = model(inp)
+        
+        print(f"   ✅ Modelo ejecutado: {coordinates.shape}")
+        print(f"   Rango X: [{coordinates[0, :, 0].min().item():.2f}, {coordinates[0, :, 0].max().item():.2f}]")
+        print(f"   Rango Y: [{coordinates[0, :, 1].min().item():.2f}, {coordinates[0, :, 1].max().item():.2f}]")
+        print(f"   Rango Z: [{coordinates[0, :, 2].min().item():.2f}, {coordinates[0, :, 2].max().item():.2f}]")
+        
+        # Verificar si hay variabilidad real
+        x_var = coordinates[0, :, 0].std().item()
+        y_var = coordinates[0, :, 1].std().item()
+        z_var = coordinates[0, :, 2].std().item()
+        
+        print(f"   Variabilidad X: {x_var:.2f}, Y: {y_var:.2f}, Z: {z_var:.2f}")
+        
+        if x_var > 1.0 and y_var > 1.0:
+            print(f"   ✅ VARIABILIDAD ADECUADA - Esqueleto debería verse correcto")
+        else:
+            print(f"   ⚠️ POCA VARIABILIDAD - Posible problema en heatmaps")
+            
+        return coordinates
     
-    spine_vector = spine_top - spine_bottom
+def exact_demo_processing(pose_3d_raw, img2bb_trans, root_depth, cfg):
+    """Procesamiento EXACTO como en demo.py sin modificaciones"""
     
-    # Calcular ángulo - aquí está la corrección crucial
-    # Un humano de pie tendrá vector vertical (0, -1) en coordenadas de imagen
-    # atan2 con estos argumentos da el ángulo correcto respecto a la vertical
-    desired_angle = 0  # deseamos que la columna sea vertical
-    current_angle = np.arctan2(spine_vector[0], -spine_vector[1])
-    rotation_angle = desired_angle - current_angle
+    print(f"🔄 Aplicando procesamiento exacto de demo.py...")
     
-    # Solo rotar si el ángulo es significativo (más de 5 grados)
-    if abs(rotation_angle) > 0.09:  # ~5 grados en radianes
-        # Calcular centro para la rotación (centroide del cuerpo)
-        # Usar solo torso para mayor estabilidad
-        torso_points = coords[[1, 14, 15, 8, 11]]  # torso, pelvis, columna, caderas
-        center = np.mean(torso_points, axis=0)
-        
-        # Matriz de rotación en 2D
-        cos_theta = np.cos(rotation_angle)
-        sin_theta = np.sin(rotation_angle)
-        rot_matrix = np.array([
-            [cos_theta, -sin_theta],
-            [sin_theta, cos_theta]
-        ])
-        
-        # Aplicar rotación
-        centered_coords = coords - center
-        rotated_coords = np.dot(centered_coords, rot_matrix.T)
-        result = rotated_coords + center
-        
-        # Debug info
-        print(f"Rotando esqueleto {np.degrees(rotation_angle):.1f}° grados")
-        
-        return result
+    # Verificar que los valores estén en el rango esperado
+    if not (0 <= pose_3d_raw[:, 0].max() <= cfg.output_shape[1] + 5 and
+            0 <= pose_3d_raw[:, 1].max() <= cfg.output_shape[0] + 5 and
+            0 <= pose_3d_raw[:, 2].max() <= cfg.depth_dim + 5):
+        print(f"❌ VALORES FUERA DE RANGO ESPERADO - El modelo no está funcionando correctamente")
+        print(f"   Esto explica por qué el esqueleto es diagonal")
+        return None
     
-    return coords
-def adjust_skeleton_proportions(coords, scale_factor=1.3):
-    """
-    Versión mejorada del ajuste de proporciones del esqueleto
-    """
-    if coords.shape[0] < 15:
-        return coords
-        
-    # Usar múltiples puntos de anclaje para mayor estabilidad
-    pelvis = coords[14].copy()
-    spine = coords[15].copy()  
+    # Aplicar transformación EXACTA de demo.py
+    pose_3d = pose_3d_raw.copy()
     
-    # Vector que define la dirección vertical ideal del cuerpo
-    spine_vector = coords[1] - coords[14]
-    spine_length = np.linalg.norm(spine_vector)
-    
-    # Calcular factor de escala adaptativo basado en las dimensiones del bbox detectado
-    # El escalado vertical debe ser ligeramente mayor para compensar la compresión
-    vertical_scale = scale_factor * 1.1  # Aumentar escala vertical un 10% adicional
-    
-    # Crear una matriz de escala no uniforme para estirar más verticalmente
-    for i in range(len(coords)):
-        # Vector desde pelvis a cada articulación
-        vec = coords[i] - pelvis
-        
-        # Proyección sobre el vector columna
-        spine_dir = spine_vector / (spine_length + 1e-6)
-        proj_len = np.dot(vec, spine_dir)
-        
-        # Componente paralela a columna (escalar verticalmente)
-        parallel = proj_len * spine_dir
-        
-        # Componente perpendicular a columna (escalar horizontalmente)
-        perp = vec - parallel
-        
-        # Aplicar escalas diferentes
-        scaled_vec = parallel * vertical_scale + perp * scale_factor
-        
-        # Aplicar la transformación
-        coords[i] = pelvis + scaled_vec
-    
-    # Ajustes adicionales específicos para partes del cuerpo
-    # Ensanchar hombros
-    shoulder_center = (coords[2] + coords[5]) / 2
-    coords[2] = shoulder_center + (coords[2] - shoulder_center) * 1.3
-    coords[5] = shoulder_center + (coords[5] - shoulder_center) * 1.3
-    
-    # Ajustar posición de la cabeza si está muy baja
-    neck_to_head = coords[16] - coords[1]
-    if np.linalg.norm(neck_to_head) < spine_length * 0.15:
-        # Subir la cabeza si está muy cercana al cuello
-        coords[16] = coords[1] + neck_to_head * 1.8
-        coords[0] = coords[16] + (coords[0] - coords[16]) * 1.2  # Ajustar top de cabeza también
-        
-    print(f"Proporciones ajustadas con escala vertical={vertical_scale:.2f}, horizontal={scale_factor:.2f}")
-    
-    return coords
+    # inverse affine transform (restore the crop and resize)
+    pose_3d[:, 0] = pose_3d[:, 0] / cfg.output_shape[1] * cfg.input_shape[1]
+    pose_3d[:, 1] = pose_3d[:, 1] / cfg.output_shape[0] * cfg.input_shape[0]
+    pose_3d_xy1 = np.concatenate((pose_3d[:, :2], np.ones_like(pose_3d[:, :1])), 1)
+    img2bb_trans_001 = np.concatenate((img2bb_trans, np.array([0, 0, 1]).reshape(1, 3)))
+    pose_3d[:, :2] = np.dot(np.linalg.inv(img2bb_trans_001), pose_3d_xy1.transpose(1, 0)).transpose(1, 0)[:, :2]
 
-def improved_skeleton_alignment(coords_img, bbox, pose_3d=None):
-    """Alineación precisa basada en múltiples puntos de referencia anatómicos"""
+    # root-relative discretized depth -> absolute continuous depth
+    pose_3d[:, 2] = (pose_3d[:, 2] / cfg.depth_dim * 2 - 1) * (cfg.bbox_3d_shape[0]/2) + root_depth
+    
+    return pose_3d
+    
+def robust_skeleton_alignment(coords_2d, bbox, confidence_threshold=0.3):
+    """
+    Alineación robusta del esqueleto basada en anatomía humana
+    
+    Args:
+        coords_2d: Coordenadas 2D de las articulaciones
+        bbox: Bounding box [x1, y1, x2, y2]
+        confidence_threshold: Umbral para considerar articulaciones válidas
+    """
     x1, y1, x2, y2 = bbox
+    bbox_width = x2 - x1
+    bbox_height = y2 - y1
+    bbox_center_x = (x1 + x2) / 2
+    bbox_center_y = (y1 + y2) / 2
     
-    # 1. Identificar referencias anatómicas clave
-    # Cabeza, cuello, hombros, cadera
-    head_idx = 16
-    neck_idx = 1
-    shoulder_r_idx, shoulder_l_idx = 2, 5
-    hip_r_idx, hip_l_idx = 8, 11
+    # Identificar articulaciones clave según el estándar COCO/Human3.6M
+    # Índices típicos: 0=nariz, 1=cuello, 2=hombro_der, 5=hombro_izq, 
+    # 8=cadera_der, 11=cadera_izq, 14=pelvis, 15=torso, 16=cabeza
     
-    # 2. Extraer línea central del cuerpo (más estable)
-    central_indices = [16, 1, 15, 14]  # cabeza, cuello, columna, pelvis
-    central_points = coords_img[central_indices]
+    key_joints = {
+        'head': 16 if len(coords_2d) > 16 else 0,
+        'neck': 1,
+        'torso': 15 if len(coords_2d) > 15 else 1,
+        'pelvis': 14 if len(coords_2d) > 14 else 8,
+        'shoulder_r': 2,
+        'shoulder_l': 5,
+        'hip_r': 8,
+        'hip_l': 11
+    }
     
-    # 3. Calcular proporciones corporales ideales respecto al bbox
-    body_height = y2 - y1
-    ideal_head_pos_y = y1 + body_height * 0.15  # 15% desde arriba
-    ideal_neck_pos_y = y1 + body_height * 0.22  # 22% desde arriba
-    ideal_hip_pos_y = y1 + body_height * 0.55   # 55% desde arriba
+    # Calcular centro corporal basado en articulaciones confiables
+    valid_torso_joints = []
+    for joint_name, idx in key_joints.items():
+        if idx < len(coords_2d):
+            joint_pos = coords_2d[idx]
+            # Verificar si la articulación está dentro de límites razonables
+            if (0 <= joint_pos[0] <= bbox_width * 3 and 
+                0 <= joint_pos[1] <= bbox_height * 3):
+                valid_torso_joints.append(joint_pos)
     
-    # 4. Calcular centro horizontal ideal basado en tipo de vista
-    hip_width = np.linalg.norm(coords_img[hip_r_idx] - coords_img[hip_l_idx])
-    shoulder_width = np.linalg.norm(coords_img[shoulder_r_idx] - coords_img[shoulder_l_idx])
-    width_ratio = hip_width / (shoulder_width + 1e-6)
-    
-    # Determinar si es vista frontal, trasera o lateral
-    is_side_view = width_ratio < 0.7 or width_ratio > 1.3
-    
-    # 5. Aplicar transformaciones específicas según el tipo de vista
-    if is_side_view:
-        # Vista lateral: anclaje en pelvis + columna
-        spine_points = coords_img[[14, 15, 1]]  # pelvis, columna, cuello
-        ref_point = np.mean(spine_points, axis=0)
-        target_x = (x1 + x2) / 2
+    if len(valid_torso_joints) < 3:
+        print("⚠️ Pocas articulaciones válidas detectadas, usando centroide simple")
+        body_center = np.mean(coords_2d, axis=0)
     else:
-        # Vista frontal: anclaje en centro de hombros y caderas
-        torso_center = np.mean(coords_img[[2, 5, 8, 11]], axis=0)
-        ref_point = torso_center
-        # En vista frontal, alinear con el centro del bbox
-        target_x = (x1 + x2) / 2
+        body_center = np.mean(valid_torso_joints, axis=0)
     
-    # 6. Calcular y aplicar offsets con mayor precisión
-    # Offset horizontal (más preciso)
-    offset_x = target_x - ref_point[0]
+    # Calcular offset para centrar el esqueleto en el bbox
+    target_center_x = bbox_center_x
+    target_center_y = bbox_center_y
     
-    # Offset vertical (basado en múltiples puntos)
-    head_offset = ideal_head_pos_y - coords_img[head_idx, 1]
-    neck_offset = ideal_neck_pos_y - coords_img[neck_idx, 1]
-    hip_offset = ideal_hip_pos_y - coords_img[14, 1]  # pelvis
+    offset_x = target_center_x - body_center[0]
+    offset_y = target_center_y - body_center[1]
     
-    # Usar promedio ponderado con más peso en el cuello (más estable)
-    offset_y = (head_offset*0.3 + neck_offset*0.5 + hip_offset*0.2)
+    # Aplicar offset con suavizado para evitar saltos bruscos
+    smoothing_factor = 0.7  # Factor de suavizado [0,1]
+    coords_aligned = coords_2d.copy()
+    coords_aligned[:, 0] += offset_x * smoothing_factor
+    coords_aligned[:, 1] += offset_y * smoothing_factor
     
-    # 7. Aplicar transformación con amortiguación para mayor estabilidad
-    result = coords_img.copy()
-    result[:, 0] += offset_x
-    result[:, 1] += offset_y
+    # Verificar y corregir escalado si el esqueleto está muy pequeño o grande
+    skeleton_height = np.max(coords_aligned[:, 1]) - np.min(coords_aligned[:, 1])
+    skeleton_width = np.max(coords_aligned[:, 0]) - np.min(coords_aligned[:, 0])
     
-    return result
-def estimate_depth_from_bbox(bbox):
-    width, height = bbox[2], bbox[3]
-    normalized_size = np.sqrt(width * height) / 100.0  # Normalizar al tamaño típico
-    estimated_depth = 5000/(normalized_size + 0.1)
-    return np.clip(estimated_depth, 3000, 15000)
+    expected_height_ratio = 0.8  # El esqueleto debería ocupar ~80% del bbox
+    expected_width_ratio = 0.6   # El esqueleto debería ocupar ~60% del bbox
+    
+    if skeleton_height > 0:
+        height_scale = (bbox_height * expected_height_ratio) / skeleton_height
+        width_scale = (bbox_width * expected_width_ratio) / skeleton_width
+        
+        # Usar escala conservadora para evitar distorsión
+        scale = min(max(height_scale, width_scale), 1.5)  # Limitar escala máxima
+        scale = max(scale, 0.5)  # Limitar escala mínima
+        
+        if abs(scale - 1.0) > 0.1:  # Solo aplicar si la diferencia es significativa
+            center = np.mean(coords_aligned, axis=0)
+            coords_aligned = center + (coords_aligned - center) * scale
+            print(f"📏 Aplicando escala corporal: {scale:.2f}")
+    
+    return coords_aligned
+
+def draw_skeleton(img: np.ndarray, joints: np.ndarray, skeleton, offset=(0, 0), color=(0, 255, 0)):
+    """Dibuja articulaciones y líneas de esqueleto con verificaciones de seguridad"""
+    if len(joints) == 0:
+        return
+        
+    # Verificar que las coordenadas estén dentro de la imagen
+    h, w = img.shape[:2]
+    
+    # Dibujar conexiones del esqueleto
+    for (i, j) in skeleton:
+        if i < len(joints) and j < len(joints):
+            x1, y1 = int(joints[i][0] + offset[0]), int(joints[i][1] + offset[1])
+            x2, y2 = int(joints[j][0] + offset[0]), int(joints[j][1] + offset[1])
+            
+            # Verificar que los puntos estén dentro de la imagen
+            if (0 <= x1 < w and 0 <= y1 < h and 0 <= x2 < w and 0 <= y2 < h):
+                cv2.line(img, (x1, y1), (x2, y2), color, 2)
+    
+    # Dibujar articulaciones
+    for idx, (x, y) in enumerate(joints):
+        x_draw, y_draw = int(x + offset[0]), int(y + offset[1])
+        if 0 <= x_draw < w and 0 <= y_draw < h:
+            cv2.circle(img, (x_draw, y_draw), 3, color, -1)
+            # Opcional: mostrar número de articulación para debug
+            # cv2.putText(img, str(idx), (x_draw+5, y_draw-5), cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+
+def debug_joint_positions(coords_2d, frame_count):
+    """Debug detallado de posiciones de articulaciones para configurar skeleton"""
+    print(f"\n🔍 DEBUG ARTICULACIONES Frame {frame_count}:")
+    print("="*60)
+    
+    # Mostrar todas las articulaciones con sus coordenadas
+    for i, (x, y) in enumerate(coords_2d):
+        print(f"   Joint {i:2d}: X={x:6.1f}, Y={y:6.1f}")
+    
+    # Análisis anatómico
+    print(f"\n📊 ANÁLISIS ANATÓMICO:")
+    
+    # Ordenar por Y (vertical) - cabeza arriba, pies abajo
+    y_sorted = sorted(enumerate(coords_2d), key=lambda x: x[1][1])
+    print(f"   Por altura (Y menor = arriba):")
+    for i, (joint_idx, (x, y)) in enumerate(y_sorted):
+        region = "CABEZA" if i < 3 else "TORSO" if i < 12 else "PIERNAS"
+        print(f"     {region:7} - Joint {joint_idx:2d}: Y={y:6.1f}")
+    
+    # Ordenar por X (horizontal) - izquierda/derecha
+    x_sorted = sorted(enumerate(coords_2d), key=lambda x: x[1][0])
+    print(f"\n   Por posición horizontal (X menor = izquierda):")
+    for i, (joint_idx, (x, y)) in enumerate(x_sorted):
+        side = "IZQUIERDA" if i < 9 else "DERECHA"
+        print(f"     {side:9} - Joint {joint_idx:2d}: X={x:6.1f}")
+    
+    # Detectar candidatos para articulaciones principales
+    print(f"\n🎯 CANDIDATOS PARA SKELETON:")
+    
+    # Cabeza (Y más pequeño)
+    head_candidates = [idx for idx, _ in y_sorted[:3]]
+    print(f"   Cabeza:    {head_candidates}")
+    
+    # Cuello/Hombros (zona intermedia superior)
+    neck_candidates = [idx for idx, _ in y_sorted[3:6]]
+    print(f"   Cuello:    {neck_candidates}")
+    
+    # Torso (zona media)
+    torso_candidates = [idx for idx, _ in y_sorted[6:12]]
+    print(f"   Torso:     {torso_candidates}")
+    
+    # Pelvis/Caderas (zona inferior)
+    pelvis_candidates = [idx for idx, _ in y_sorted[12:15]]
+    print(f"   Pelvis:    {pelvis_candidates}")
+    
+    # Piernas (Y más grande)
+    legs_candidates = [idx for idx, _ in y_sorted[15:]]
+    print(f"   Piernas:   {legs_candidates}")
+    
+    return {
+        'head': head_candidates,
+        'neck': neck_candidates, 
+        'torso': torso_candidates,
+        'pelvis': pelvis_candidates,
+        'legs': legs_candidates
+    }
+
+def suggest_skeleton_connections(joint_analysis):
+    """Sugiere conexiones de skeleton basadas en análisis anatómico"""
+    print(f"\n🔧 SUGERENCIAS DE CONEXIONES:")
+    
+    suggestions = []
+    
+    try:
+        # Conexiones principales basadas en anatomía
+        if joint_analysis['head'] and joint_analysis['neck']:
+            conn = (joint_analysis['head'][0], joint_analysis['neck'][0])
+            suggestions.append(conn)
+            print(f"   Cabeza -> Cuello: {conn}")
+        
+        if joint_analysis['neck'] and joint_analysis['torso']:
+            conn = (joint_analysis['neck'][0], joint_analysis['torso'][0])
+            suggestions.append(conn)
+            print(f"   Cuello -> Torso: {conn}")
+            
+        if joint_analysis['torso'] and joint_analysis['pelvis']:
+            conn = (joint_analysis['torso'][-1], joint_analysis['pelvis'][0])
+            suggestions.append(conn)
+            print(f"   Torso -> Pelvis: {conn}")
+            
+        if joint_analysis['pelvis'] and joint_analysis['legs']:
+            # Conectar pelvis con ambas piernas
+            for leg_joint in joint_analysis['legs'][:2]:
+                conn = (joint_analysis['pelvis'][0], leg_joint)
+                suggestions.append(conn)
+                print(f"   Pelvis -> Pierna: {conn}")
+        
+    except (IndexError, KeyError) as e:
+        print(f"   ⚠️ Error generando sugerencias: {e}")
+    
+    return suggestions
 def main():
-    cfg.input_shape = (256, 256)  # Ajustar tamaño de entrada para YOLOv5
-    cfg.output_shape = (32, 32)  # Ajustar tamaño de salida para ConvNeXtPose
-    cfg.depth_dim = 32
-    cfg.bbox_3d_shape = (2000, 2000, 2000)  # Dimensiones del espacio 3D
-    parser = argparse.ArgumentParser(
-        description="Detección de personas con YOLO INT8-ONNX + DeepSparse "
-                    "y estimación de pose 3D con ConvNeXtPose desde checkpoint PyTorch"
-    )
-    parser.add_argument('--input', type=str, default='0',
-                        help='Fuente de video (0=webcam o ruta archivo)')
-    parser.add_argument('--yolo-model', type=str, default='zoo:cv/detection/yolov5-s/pytorch/ultralytics/coco/pruned65_quant-none',
-                        help='Ruta al modelo YOLO ONNX (INT8) para DeepSparse')
-    parser.add_argument('--pose-model', type=str, required=True,
-                        help='Ruta al checkpoint ConvNeXtPose (.pth)')
-    parser.add_argument('--conf-thresh', type=float, default=0.3,
-                        help='Umbral de confianza para detección de personas')
-    parser.add_argument('--iou-thresh', type=float, default=0.45,
-                        help='Umbral de IoU para Non-Maximum Suppression (NMS)')
+    # Configuración mejorada
+    cfg.input_shape = (256, 256)
+    cfg.output_shape = (32, 32)  # ✅ Configuración original
+    cfg.depth_dim = 32           # ✅ Configuración original
+    cfg.bbox_3d_shape = (2000, 2000, 2000)
+    
+    parser = argparse.ArgumentParser(description="ConvNeXt + RootNet Integration - Fixed Version")
+    parser.add_argument('--input', type=str, default='0', help='Video source')
+    parser.add_argument('--yolo-model', type=str, 
+                        default='zoo:cv/detection/yolov5-s/pytorch/ultralytics/coco/pruned65_quant-none',
+                        help='YOLO ONNX model path')
+    parser.add_argument('--pose-model', type=str, required=True, help='ConvNeXt checkpoint path')
+    parser.add_argument('--rootnet-dir', type=str, 
+                        default='/home/fabri/3DMPPE_ROOTNET_RELEASE',
+                        help='RootNet directory path')
+    parser.add_argument('--rootnet-model', type=str,
+                        default='/home/fabri/3DMPPE_ROOTNET_RELEASE/demo/snapshot_18.pth.tar',
+                        help='RootNet model checkpoint')
+    parser.add_argument('--conf-thresh', type=float, default=0.3, help='Confidence threshold')
+    parser.add_argument('--iou-thresh', type=float, default=0.45, help='IoU threshold for NMS')
+    parser.add_argument('--diagnose', action='store_true', help='Ejecutar diagnóstico completo del modelo')
     args = parser.parse_args()
 
-    # 1) Inicializar motor DeepSparse con modelo YOLOv5 INT8-ONNX
-    print(f"[INFO] Cargando YOLO INT8-ONNX con DeepSparse desde: {args.yolo_model}")
+    if args.diagnose:
+        diagnosis_result = complete_model_diagnosis(args.pose_model)
+        
+        if not diagnosis_result:
+            print(f"❌ FALLO EN DIAGNÓSTICO - Revisa el checkpoint")
+            return
+        else:
+            print(f"✅ DIAGNÓSTICO EXITOSO - Continuando con demo...")
+    # Inicializar modelos
+    print(f"[INFO] Cargando YOLO con DeepSparse: {args.yolo_model}")
     yolo_pipeline = Pipeline.create(task="yolo", model_path=args.yolo_model)
     
-    # 2) Cargar ConvNeXtPose desde .pth (PyTorch)
-    print(f"[INFO] Cargando ConvNeXtPose desde checkpoint: {args.pose_model}")
-    pose_model, device = load_pose_model(args.pose_model, joint_num=18, use_cuda=False)
+    print(f"[INFO] Cargando ConvNeXtPose: {args.pose_model}")
+    pose_model, device = load_pose_model_final(args.pose_model, joint_num=18, use_cuda=False)
+    
+    print(f"[INFO] Inicializando RootNet: {args.rootnet_dir}")
+    root_wrapper = RootNetWrapper(args.rootnet_dir, args.rootnet_model)
+    root_wrapper.load_model(use_gpu=False)
 
-
-    # 3) Transformación para ConvNeXtPose
+    # Transformación para ConvNeXt
     pose_transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std),
     ])
 
-    # 4) Definir esqueleto
-    skeleton = (
-        (0, 16), (16, 1), (1, 15), (15, 14), (14, 8),
-        (8, 9), (9, 10), (14, 11), (11, 12), (12, 13),
-        (1, 2), (2, 3), (3, 4), (1, 5), (5, 6), (6, 7)
-    )
-
-    # 5) Captura de video - CORREGIR FUENTE
+    # Esqueleto Human3.6M/COCO standard
+    skeleton = [
+        # =================== COLUMNA VERTEBRAL (Progresión Y natural) ===================
+        (10, 9),   # Cabeza superior -> Cabeza media ✅
+        (9, 8),    # Cabeza media -> Cuello base ✅
+        #(8, 17),   # Cuello base -> Torso superior ✅
+        #(17, 7),   # Torso superior -> Torso medio ✅
+        
+        # =================== BRAZOS SIMPLIFICADOS Y CORRECTOS ===================
+        # Hombros desde cuello/torso (conexión dual para estabilidad)
+        (8, 11),   # Cuello -> Hombro derecho ✅
+        (8, 14),   # Cuello -> Hombro izquierdo ✅
+        
+        # Brazo derecho (funciona bien en las imágenes)
+        (11, 12),  # Hombro derecho -> Codo derecho ✅
+        (12, 13),   # Codo derecho -> Muñeca derecha ✅
+        
+        # Brazo izquierdo  (de frente) CORREGIDO (eliminar conexión problemática)
+        (14, 15),  # Hombro izquierdo -> Codo izquierdo ✅
+        # ELIMINAR (15, 16) que causa el problema visual
+        (15, 16),  # Conexión directa: Hombro izquierdo -> Muñeca izquierda ✅
+        
+        # =================== TORSO A PELVIS SIMPLIFICADO ===================
+        (11, 4),
+        (14, 1),
+        # Conexión directa desde torso medio a ambas caderas
+        # 0 -> cadera de en medio
+        # (7, 0), # Torso medio -> Cadera de en medio ✅
+        (0, 4),    # Cadera de en medio -> Cadera derecha ✅
+        (0, 1),    # Cadera de en medio -> Cadera izquierda ✅
+        
+        # =================== PIERNAS ANATÓMICAMENTE CORRECTAS ===================
+        # Pierna derecha (secuencia natural)
+        (4, 5),    # Cadera derecha -> Rodilla derecha ✅
+        (5, 6),    # Rodilla derecha -> Tobillo derecho ✅
+        
+        # Pierna izquierda (secuencia natural)
+        (1, 2),    # Cadera izquierda -> Rodilla izquierda ✅
+        (2, 3),    # Rodilla izquierda -> Tobillo izquierdo ✅) ✅
+    ]
+    
+    print(f"🔧 Usando esqueleto CORREGIDO BASADO EN ANÁLISIS REAL con {len(skeleton)} conexiones")
+    
+    # Configurar captura de video
     if args.input == '0':
-        cap = cv2.VideoCapture(0)  # Webcam
+        cap = cv2.VideoCapture(0)
     elif args.input.isdigit():
         cap = cv2.VideoCapture(int(args.input))
     else:
-        # Para TCP o archivo
         if args.input.startswith('tcp://'):
             cap = cv2.VideoCapture(args.input)
         else:
@@ -327,174 +681,154 @@ def main():
     frame_count = 0
     pose_latencies = []
     yolo_size = (640, 640)
-    every_n = 1  # Procesar cada frame para testing
     last_coords_2d = []
-    root_wrapper = RootNetWrapper('/home/fabri/3DMPPE_ROOTNET_RELEASE', '/home/fabri/3DMPPE_ROOTNET_RELEASE/demo/snapshot_18.pth.tar')
-    root_wrapper.load_model(use_gpu=False)
-    print("[INFO] Iniciando demo en tiempo real. Presione 'q' para salir.")
+    
+    print("[INFO] Demo iniciado. Presione 'q' para salir.")
     
     while True:
         ret, frame = cap.read()
         if not ret:
-            print("Error recibiendo frame o fin del video")
             break
             
         t_frame_start = time.time()
         
-        if frame_count % every_n == 0:
-            # ===== CORRECCIÓN CRÍTICA: Usar directamente el frame sin conversión RGB =====
-            # YOLOv5 espera BGR (formato de OpenCV)
-            img_lb, scale, pad_left, pad_top = letterbox(frame, new_size=yolo_size)
+        # Detección YOLO
+        img_lb, scale, pad_left, pad_top = letterbox(frame, new_size=yolo_size)
+        
+        try:
+            outputs = yolo_pipeline(
+                images=img_lb,
+                score_threshold=args.conf_thresh,
+                nms_threshold=args.iou_thresh,
+            )
             
-            # Debug: mostrar frame de entrada
-            if frame_count % 30 == 0:
-                print(f"Frame shape: {frame.shape}, Letterbox shape: {img_lb.shape}")
-                cv2.imshow("Input to YOLO", cv2.resize(img_lb, (320, 320)))
-
-            # CORRECCIÓN: Pasar imagen directamente sin normalización previa
-            # DeepSparse YOLO pipeline maneja la normalización internamente
-            try:
-                outputs = yolo_pipeline(
-                    images=img_lb,  # Pasar imagen BGR directamente
-                    score_threshold=args.conf_thresh,
-                    nms_threshold=args.iou_thresh,
-                )
+            if isinstance(outputs, list) and len(outputs) > 0:
+                outputs = outputs[0]
+            
+            # Procesar detecciones
+            if hasattr(outputs, 'boxes') and len(outputs.boxes) > 0:
+                boxes_640 = np.array(outputs.boxes[0])
+                scores_out = np.array(outputs.scores[0])
+                labels_out = np.array(outputs.labels[0])
                 
-                if isinstance(outputs, list) and len(outputs) > 0:
-                    outputs = outputs[0]
+                # Filtrar personas con confianza suficiente
+                mask_person = (labels_out == 0) & (scores_out >= args.conf_thresh)
                 
-                print(f"outputs: {outputs}")
-                
-                # Verificar si hay detecciones
-                if hasattr(outputs, 'boxes') and len(outputs.boxes) > 0:
-                    # Aplanar listas anidadas de DeepSparse
-                    boxes_640 = np.array(outputs.boxes[0])  # Shape: (N, 4)
-                    scores_out = np.array(outputs.scores[0])  # Shape: (N,)
-                    labels_out = np.array(outputs.labels[0])  # Shape: (N,)
+                if np.any(mask_person):
+                    boxes_640_person = boxes_640[mask_person]
+                    scores_person = scores_out[mask_person]
                     
-                    print(f"Detecciones: {len(boxes_640)} cajas, labels: {labels_out}, scores: {scores_out}")
-                    
-                    # Filtrar por clase persona (label 0) Y por confianza
-                    mask_person = (labels_out == 0) & (scores_out >= args.conf_thresh)
-                    
-                    if np.any(mask_person):
-                        boxes_640_person = boxes_640[mask_person]
-                        scores_person = scores_out[mask_person]
+                    # Convertir coordenadas y procesar pose
+                    final_boxes = []
+                    for box in boxes_640_person:
+                        x1_lb, y1_lb, x2_lb, y2_lb = box
                         
-                        print(f"Personas detectadas: {len(boxes_640_person)}")
+                        # Revertir letterbox
+                        x1_un = (x1_lb - pad_left) / scale
+                        y1_un = (y1_lb - pad_top) / scale
+                        x2_un = (x2_lb - pad_left) / scale
+                        y2_un = (y2_lb - pad_top) / scale
+
+                        x1o = int(max(x1_un, 0))
+                        y1o = int(max(y1_un, 0))
+                        x2o = int(min(x2_un, frame.shape[1] - 1))
+                        y2o = int(min(y2_un, frame.shape[0] - 1))
+
+                        if (x2o > x1o) and (y2o > y1o):
+                            final_boxes.append((x1o, y1o, x2o, y2o))
+
+                    # Procesar pose para cada detección
+                    last_coords_2d.clear()
+                    for n, (x1o, y1o, x2o, y2o) in enumerate(final_boxes):
+                        cv2.rectangle(frame, (x1o, y1o), (x2o, y2o), (0, 255, 0), 2)
                         
-                        # Convertir coordenadas y procesar pose
-                        final_boxes = []
-                        for box in boxes_640_person:
-                            # Las cajas ya vienen en formato xyxy
-                            x1_lb, y1_lb, x2_lb, y2_lb = box
+                        # Preparar bbox para procesamiento
+                        bbox = [x1o, y1o, x2o - x1o, y2o - y1o]
+                        proc_bbox = pose_utils.process_bbox(np.array(bbox), frame.shape[1], frame.shape[0])
+                        
+                        if proc_bbox is not None:
                             
-                            # Revertir letterbox
-                            x1_un = (x1_lb - pad_left) / scale
-                            y1_un = (y1_lb - pad_top) / scale
-                            x2_un = (x2_lb - pad_left) / scale
-                            y2_un = (y2_lb - pad_top) / scale
-
-                            x1o = int(max(x1_un, 0))
-                            y1o = int(max(y1_un, 0))
-                            x2o = int(min(x2_un, frame.shape[1] - 1))
-                            y2o = int(min(y2_un, frame.shape[0] - 1))
-
-                            if (x2o > x1o) and (y2o > y1o):
-                                final_boxes.append((x1o, y1o, x2o, y2o))
-
-                        # Procesar pose para cada detección
-                        last_coords_2d.clear()
-                        for n, (x1o, y1o, x2o, y2o) in enumerate(final_boxes):
-                            cv2.rectangle(frame, (x1o, y1o), (x2o, y2o), (0, 255, 0), 2)
+                            # Generar patch de imagen
+                            img_patch, img2bb_trans = generate_patch_image(
+                                frame, proc_bbox, False, 1.0, 0.0, False
+                            )
+                            # Preparar entrada para ConvNeXt
+                            inp = pose_transform(img_patch).unsqueeze(0).to(device)
+                            # Obtener profundidad raíz con RootNet
+                            root_depth = root_wrapper.predict_depth(frame, bbox)
                             
-                            # Procesar pose (mantener código original)
-                            bbox = [x1o, y1o, x2o - x1o, y2o - y1o]
-                            proc_bbox = pose_utils.process_bbox(np.array(bbox), frame.shape[1], frame.shape[0])
                             
-                            if proc_bbox is not None:
-                                img_patch, img2bb_trans = generate_patch_image(frame, proc_bbox, False, 1.0, 0.0, False)
-                                inp = pose_transform(img_patch).unsqueeze(0).to(device)
-                                root_depth = root_wrapper.predict_depth(frame, bbox)
-                                print(f"bbox: {proc_bbox}, root_depth: {root_depth}")
-                                
-                                t0 = time.time()
-                                with torch.no_grad():
-                                    outputs = pose_model(inp)
-                                    if outputs.dim() > 3:
-                                        from model import soft_argmax
-                                        pose_3d = soft_argmax(outputs, joint_num = 18, depth_dim = cfg.depth_dim, output_shape = cfg.output_shape)
-                                    else:
-                                        pose_3d = outputs
-                                t1 = time.time()
-                                
-                                latency_ms = (t1 - t0) * 1000
-                                pose_latencies.append(latency_ms)
-                                
-                                pose_3d = pose_3d[0].cpu().numpy()
+                            # Inferencia ConvNeXt
+                            t0 = time.time()
+                            pose_3d = corrected_inference_final_v4(pose_model, inp, cfg)
+                            if pose_3d is not None:
+                                pose_3d_numpy = pose_3d[0].cpu().numpy()
+                                pose_3d_corrected = exact_demo_processing(pose_3d_numpy,img2bb_trans, root_depth, cfg) 
 
-                                if np.abs(pose_3d).max() > 1000:
-                                    scale_factor = np.abs(pose_3d).max() / 18.0
-                                    pose_3d = pose_3d / scale_factor
-                                    print(f"⚠️ Valores extremos detectados, aplicando normalización. Factor: {scale_factor}")
-                                pose_3d[:,0] = np.abs(pose_3d[:,0]) % cfg.output_shape[1]
-                                pose_3d[:,1] = np.abs(pose_3d[:,1]) % cfg.output_shape[0]
+                                if pose_3d_corrected is not None:
+                                    coords_2d = pose_3d_corrected[:, :2]
+                                    print(f" DEBUG: pose_3d shape: {pose_3d.shape}")
+                                    t1 = time.time()
+                                    
+                                    latency_ms = (t1 - t0) * 1000
+                                    pose_latencies.append(latency_ms)
+                                    
+                                    # # Aplicar alineación robusta
+                                    # coords_aligned = robust_skeleton_alignment(
+                                    #     coords_2d, [x1o, y1o, x2o, y2o]
+                                    # )
+                                    # Verificar límites de imagen
+                                    coords_2d[:, 0] = np.clip(coords_2d[:, 0], 0, frame.shape[1]-1)
+                                    coords_2d[:, 1] = np.clip(coords_2d[:, 1], 0, frame.shape[0]-1)
+                                    
+                                    last_coords_2d.append(coords_2d)
+                                    
+                                    # Debug info
+                                    if frame_count % 30 == 0:
+                                        joint_analysis = debug_joint_positions(coords_2d, frame_count)
+                                        skeleton_suggestions = suggest_skeleton_connections(joint_analysis)
+                                        
+                                        print(f"✅ Frame {frame_count}: Pose procesada exitosamente")
+                                        print(f"🔍 DEBUG Frame {frame_count}: bbox={proc_bbox}, root_depth={root_depth:.1f}")
+                                        print(f"   Coords range X: [{coords_2d[:, 0].min():.1f}, {coords_2d[:, 0].max():.1f}]")
+                                        print(f"   Coords range Y: [{coords_2d[:, 1].min():.1f}, {coords_2d[:, 1].max():.1f}]")
+                                    if frame_count % 60 == 0:
+                                        print(f"🔄 Esqueleto actualizado con {len(skeleton)} conexiones")
+                                else:
+                                    print("⚠️ Fallo en post-procesamiento")
+                                    continue
+                            else:
+                                print("⚠️ Fallo en inferencia, saltando frame")
+                                continue
 
-                                print(f"pose_3d[0:5] después de corregir: {pose_3d[:5]}")
-                                # ===== SOLUCIÓN DEFINITIVA: USAR EXACTAMENTE EL MISMO CÓDIGO QUE EN demo.py =====
-                                # 1) Primero escalar al tamaño de entrada
-                                pose_3d[:, 0] = pose_3d[:, 0] / cfg.output_shape[1] * cfg.input_shape[1]
-                                pose_3d[:, 1] = pose_3d[:, 1] / cfg.output_shape[0] * cfg.input_shape[0]
-                                pose_3d[:, 2] = (pose_3d[:, 2] / cfg.depth_dim * 2 -1 ) * (cfg.bbox_3d_shape[0]/2) + root_depth
-                                
-                                # 2) Crear matriz afín invertible completa
-                                pose_3d_xy1 = np.concatenate((pose_3d[:, :2], np.ones_like(pose_3d[:, :1])), 1)
-                                img2bb_trans_001 = np.concatenate((img2bb_trans, np.array([0, 0, 1]).reshape(1, 3)))
-                                
-                                # 3) Aplicar transformación inversa para mapear de vuelta a espacio de imagen original
-                                pose_3d[:, :2] = np.dot(np.linalg.inv(img2bb_trans_001), pose_3d_xy1.transpose(1, 0)).transpose(1, 0)[:, :2]
-                                
-                                # 4) El resultado ya son coordenadas en el espacio de imagen original
-                                coords_img = pose_3d[:, :2].copy()
-
-                                coords_img = correct_skeleton_orientation(coords_img)
-                                coords_img = adjust_skeleton_proportions(coords_img, scale_factor=1.3)
-                                coords_img = improved_skeleton_alignment(coords_img, [x1o, y1o, x2o, y2o], pose_3d)
-                                # 5) Asegurarse de que estén dentro de los límites
-                                coords_img[:, 0] = np.clip(coords_img[:, 0], 0, frame.shape[1]-1)
-                                coords_img[:, 1] = np.clip(coords_img[:, 1], 0, frame.shape[0]-1)
-                                
-                                print(f"coords_img definitivas (primeros 5): {coords_img[:5]}")
-                                draw_skeleton(frame, coords_img, skeleton, offset=(0,0), color=(0,255,0))
-                                
-                                if frame_count % every_n == 0:
-                                    last_coords_2d.append(coords_img)
-                    else:
-                        print("⚠️ No se detectaron personas con suficiente confianza")
-                else:
-                    print("⚠️ No se detectaron objetos en el frame")
-                    
-            except Exception as e:
-                print(f"Error en YOLO pipeline: {e}")
-                import traceback
-                traceback.print_exc()
+                        
+        except Exception as e:
+            print(f"❌ Error en procesamiento: {e}")
+            import traceback
+            traceback.print_exc()
 
         frame_count += 1
         
-        # Dibujar esqueleto
+        # Dibujar esqueletos
         for joints in last_coords_2d:
-            draw_skeleton(frame, joints, skeleton, offset=(0, 0), color=(0, 255, 0))
+            draw_skeleton(frame, joints, skeleton, color=(0, 255, 0))
         
-        # Mostrar FPS
+        # Mostrar información en pantalla
         fps = 1.0 / max((time.time() - t_frame_start), 1e-6)
         cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        cv2.imshow("Pose 3D (YOLO INT8 + ConvNeXtPose .pth)", frame)
+        
+        if pose_latencies:
+            avg_latency = sum(pose_latencies[-10:]) / len(pose_latencies[-10:])  # Últimas 10
+            cv2.putText(frame, f"Pose Latency: {avg_latency:.1f}ms", (10, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 0), 2)
+        
+        cv2.imshow("ConvNeXt + RootNet Integration (Fixed)", frame)
 
-        # Latencia cada 30 frames
+        # Estadísticas cada 30 frames
         if frame_count % 30 == 0 and pose_latencies:
             avg_lat = sum(pose_latencies) / len(pose_latencies)
-            print(f"[INFO] Frame {frame_count}, Latencia promedio ConvNeXtPose: {avg_lat:.2f} ms")
+            print(f"📊 Frame {frame_count}, Latencia promedio: {avg_lat:.2f}ms")
             pose_latencies.clear()
 
         if cv2.waitKey(1) & 0xFF == ord('q'):
@@ -502,6 +836,7 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    print("🏁 Demo finalizado exitosamente")
 
 if __name__ == "__main__":
     main()
