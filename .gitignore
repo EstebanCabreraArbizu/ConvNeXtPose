@@ -12,3 +12,4 @@ data/MPII/annotations/
 *.png
 *.jpg
 settings.json
+yolo*.*
