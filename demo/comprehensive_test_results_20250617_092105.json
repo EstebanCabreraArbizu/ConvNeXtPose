@@ -1,0 +1,14 @@
+{
+  "full_v3": {
+    "success": false,
+    "error": "AdaptiveFrameProcessor.__init__() missing 2 required positional arguments: 'pose_processor' and 'hardware_caps'"
+  },
+  "full_v4": {
+    "success": true,
+    "version": "Full V4 (Production)",
+    "total_time_ms": 2056.077480316162,
+    "avg_time_per_frame_ms": 411.2154960632324,
+    "processing_time_ms": 326.67880058288574,
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "root_depth": 

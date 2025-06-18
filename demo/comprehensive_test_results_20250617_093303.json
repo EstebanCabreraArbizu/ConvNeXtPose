@@ -1,0 +1,133 @@
+{
+  "full_v3": {
+    "success": false,
+    "error": "No valid poses detected"
+  },
+  "full_v4": {
+    "success": true,
+    "version": "Full V4 (Production)",
+    "total_time_ms": 2157.230854034424,
+    "avg_time_per_frame_ms": 431.44617080688477,
+    "processing_time_ms": 331.74405097961426,
+    "cache_hits": 0,
+    "cache_misses": 0,
+    "root_depth": 15828.8642578125,
+    "engine": "TensorFlow Lite",
+    "stats": {
+      "model_size": "S",
+      "engine": "TensorFlow Lite",
+      "avg_processing_time_ms": 331.74405097961426,
+      "success_rate": 100.0,
+      "cache_hit_rate": 0.0,
+      "cache_size": 5,
+      "total_processed": 5,
+      "successful_inferences": 5,
+      "queue_size": 0,
+      "result_queue_size": 0,
+      "tf_version": "2.11.0",
+      "tflite_available": true
+    }
+  },
+  "simplified_v3": {
+    "success": true,
+    "version": "Simplified V3 (Direct)",
+    "avg_inference_time_ms": 314.24453258514404,
+    "output_shape": [
+      1,
+      18,
+      3
+    ],
+    "final_coords_shape": [
+      18,
+      2
+    ],
+    "coordinates": [
+      [
+        145.3580761551857,
+        20.888499587774287
+      ],
+      [
+        145.47178474068642,
+        20.72695428133012
+      ],
+      [
+        144.6613034158945,
+        27.953985050320636
+      ],
+      [
+        145.55815593898296,
+        35.78648304939271
+      ],
+      [
+        145.36602917313576,
+        21.002073250710975
+      ],
+      [
+        144.2265399172902,
+        28.01688565313817
+      ],
+      [
+        145.8080414235592,
+        35.872228562831886
+      ],
+      [
+        144.7788713797927,
+        19.185210451483737
+      ],
+      [
+        144.29144656658173,
+        17.28202686458827
+      ],
+      [
+        143.8243817165494,
+        15.946763485670102
+      ],
+      [
+        142.53350341320038,
+        13.93390564620496
+      ],
+      [
+        144.29397895932198,
+        17.563057221472274
+      ],
+      [
+        144.58976183831692,
+        20.494472324848186
+      ],
+      [
+        144.9288059324026,
+        24.5541291832924
+      ],
+      [
+        144.58082729578018,
+        17.1833539903164
+      ],
+      [
+        145.08656451106071,
+        19.614704556763183
+      ],
+      [
+        145.32109254598618,
+        23.997794523835193
+      ],
+      [
+        144.21156203001738,
+        17.25186351686717
+      ]
+    ],
+    "engine": "PyTorch (direct)",
+    "runs": 10
+  },
+  "simplified_v4": {
+    "success": true,
+    "avg_inference_time_ms": 23.63288402557373,
+    "output_shape": [
+      1,
+      18,
+      3
+    ],
+    "engine": "ONNX Runtime",
+    "version": "Simplified V4 (Direct)",
+    "runs": 10
+  }
+}

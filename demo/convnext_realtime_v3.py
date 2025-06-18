@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
 """
-convnext_realtime_v4_FIXED.py - VERSIÓN CORREGIDA CON CONVNEXT + ROOTNET
+convnext_realtime_FINAL.py - VERSIÓN DEFINITIVA BASADA EN ANÁLISIS COMPLETO
 
-CORRECCIONES CRÍTICAS:
-1. ✅ ConvNeXt Pose Estimation restaurado
-2. ✅ RootNet para profundidad restaurado  
-3. ✅ Pipeline completo: YOLO → ConvNeXt → RootNet → Pose 2D/3D
-4. ✅ Dibujo de esqueletos completos
-5. ✅ Optimizaciones asíncronas MANTENIDAS
-6. ✅ Cache inteligente para pose estimation
+OPTIMIZACIONES FINALES:
+1. Híbrido v3 como base (mejor balance demostrado) ✅
+2. Optimizaciones GPU específicas ✅
+3. Cache más inteligente ✅
+4. Métricas mejoradas ✅
+5. Configuración adaptativa según hardware ✅
 """
 
 import argparse
@@ -16,16 +15,6 @@ import time
 import sys
 from pathlib import Path
 import os
-import warnings
-import logging
-from typing import Optional, Dict, Any, Tuple, List
-
-# Configurar logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-warnings.filterwarnings("ignore", category=UserWarning)
-
-# IMPORTS BÁSICOS
 import cv2
 import numpy as np
 import torch
@@ -36,10 +25,16 @@ import threading
 from queue import Queue, Empty
 from collections import deque
 import concurrent.futures
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 
-# IMPORTS DEL PROYECTO CONVNEXT
+# IMPORTS CORREGIDOS
+try:
+    from deepsparse.pipeline import Pipeline
+    DEEPSPARSE_AVAILABLE = True
+except ImportError:
+    print("⚠️ DeepSparse no disponible, usando fallback a Ultralytics")
+    DEEPSPARSE_AVAILABLE = False
+
+# Importar módulos del proyecto
 ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 sys.path.extend([
@@ -48,205 +43,231 @@ sys.path.extend([
     str(PROJECT_ROOT / 'common')
 ])
 
-try:
-    from config import cfg
-    from model import get_pose_net
-    from dataset import generate_patch_image
-    import utils.pose_utils as pose_utils
-    from root_wrapper import RootNetWrapper
-    logger.info("✅ Módulos ConvNeXt importados correctamente")
-except ImportError as e:
-    logger.error(f"❌ Error importando módulos ConvNeXt: {e}")
-    sys.exit(1)
+from config import cfg
+from model import get_pose_net
+from dataset import generate_patch_image
+import utils.pose_utils as pose_utils
+from root_wrapper import RootNetWrapper
 
-# VERIFICACIÓN ULTRALYTICS
-try:
-    from ultralytics import YOLO
-    ULTRALYTICS_AVAILABLE = True
-    logger.info("✅ Ultralytics disponible")
-except ImportError:
-    ULTRALYTICS_AVAILABLE = False
-    logger.error("❌ Ultralytics no disponible - Instalar con: pip install ultralytics")
-    sys.exit(1)
-
-def detect_hardware_capabilities() -> Dict[str, Any]:
-    """Detectar capacidades del hardware"""
+def detect_hardware_capabilities():
+    """Detectar capacidades del hardware para optimización automática"""
     capabilities = {
         'has_cuda': torch.cuda.is_available(),
         'cuda_device_count': torch.cuda.device_count() if torch.cuda.is_available() else 0,
-        'cuda_memory_gb': 0.0,
-        'cpu_cores': os.cpu_count() or 4,
-        'recommended_workers': 2,
-        'recommended_cache_timeout': 0.08,
-        'async_workers': 4,
+        'cuda_memory_gb': 0,
+        'cpu_cores': os.cpu_count(),
+        'recommended_workers': 1,
+        'recommended_cache_timeout': 0.12,
+        'recommended_frame_skip': 2
     }
     
     if capabilities['has_cuda']:
         try:
-            gpu_memory_bytes = torch.cuda.get_device_properties(0).total_memory
-            capabilities['cuda_memory_gb'] = gpu_memory_bytes / (1024**3)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            capabilities['cuda_memory_gb'] = gpu_memory
             
-            if capabilities['cuda_memory_gb'] >= 8:
+            # Configuración basada en GPU
+            if gpu_memory >= 8:  # RTX 3070+
                 capabilities.update({
-                    'recommended_workers': 4,
-                    'recommended_cache_timeout': 0.04,
-                    'async_workers': 8
+                    'recommended_workers': 2,
+                    'recommended_cache_timeout': 0.08,
+                    'recommended_frame_skip': 1
                 })
-            elif capabilities['cuda_memory_gb'] >= 4:
+            elif gpu_memory >= 4:  # GTX 1660+
                 capabilities.update({
-                    'recommended_workers': 3,
-                    'recommended_cache_timeout': 0.06,
-                    'async_workers': 6
+                    'recommended_workers': 1,
+                    'recommended_cache_timeout': 0.10,
+                    'recommended_frame_skip': 2
                 })
-        except Exception as e:
-            logger.warning(f"Error detectando GPU: {e}")
+        except:
+            pass
+    else:
+        # Configuración CPU conservadora
+        capabilities.update({
+            'recommended_workers': 1,
+            'recommended_cache_timeout': 0.15,
+            'recommended_frame_skip': 3
+        })
     
-    logger.info(f"🔧 Hardware: GPU={'✅' if capabilities['has_cuda'] else '❌'} "
-                f"({capabilities['cuda_memory_gb']:.1f}GB), "
-                f"CPU={capabilities['cpu_cores']} cores")
+    print(f"🔧 CONFIGURACIÓN AUTOMÁTICA DETECTADA:")
+    print(f"   GPU: {'✅' if capabilities['has_cuda'] else '❌'} ({capabilities['cuda_memory_gb']:.1f}GB)")
+    print(f"   CPU Cores: {capabilities['cpu_cores']}")
+    print(f"   Workers: {capabilities['recommended_workers']}")
+    print(f"   Cache timeout: {capabilities['recommended_cache_timeout']*1000:.0f}ms")
+    print(f"   Frame skip: 1/{capabilities['recommended_frame_skip']}")
     
     return capabilities
 
-def convert_yolo_to_onnx_safe(pt_model_path: str = 'yolov8n.pt') -> Optional[str]:
-    """Conversión YOLO a ONNX"""
-    onnx_path = pt_model_path.replace('.pt', '_optimized.onnx')
+def convert_yolo_to_onnx_optimized(pt_model_path='yolov8n.pt', 
+                                   conf_thresh=0.3, iou_thresh=0.45, img_size=640):
+    """Convierte YOLO a ONNX con optimizaciones específicas"""
+    base_name = pt_model_path.replace('.pt', '')
+    onnx_path = f"{base_name}_optimized_conf{conf_thresh}_iou{iou_thresh}.onnx"
     
     if os.path.exists(onnx_path):
-        logger.info(f"✅ ONNX encontrado: {onnx_path}")
+        print(f"✅ ONNX optimizado existente: {onnx_path}")
         return onnx_path
     
-    logger.info(f"🔄 Convirtiendo {pt_model_path} a ONNX...")
+    print(f"🔄 Convirtiendo {pt_model_path} a ONNX optimizado...")
     try:
+        from ultralytics import YOLO
         model = YOLO(pt_model_path)
+        
         exported_path = model.export(
-            format='onnx', imgsz=640, optimize=True, half=False,
-            dynamic=False, simplify=True, opset=13
+            format='onnx', 
+            imgsz=img_size, 
+            optimize=True, 
+            half=False,  # Mantener FP32 para compatibilidad
+            dynamic=False, 
+            simplify=True, 
+            opset=13,  # Opset más reciente
+            nms=True,
+            conf=conf_thresh, 
+            iou=iou_thresh, 
+            max_det=100  # Reducido para velocidad
         )
         
         if exported_path != onnx_path:
             os.rename(exported_path, onnx_path)
         
-        logger.info(f"✅ ONNX creado: {onnx_path}")
+        print(f"✅ ONNX optimizado creado: {onnx_path}")
         return onnx_path
+        
     except Exception as e:
-        logger.error(f"❌ Error conversión ONNX: {e}")
-        return None
+        print(f"❌ Error en conversión optimizada: {e}")
+        raise
 
-class ModernYOLODetector:
-    """Detector YOLO optimizado"""
+class AdaptiveYOLODetector:
+    """Detector YOLO adaptativo según hardware"""
     
-    def __init__(self, onnx_path: str, hardware_caps: Dict[str, Any]):
+    def __init__(self, onnx_path, hardware_caps):
         self.onnx_path = onnx_path
         self.hardware_caps = hardware_caps
         self._setup_session()
-        self._warmup_model()
+        self.warmup()
     
     def _setup_session(self):
-        """Configurar sesión ONNX"""
-        session_options = ort.SessionOptions()
-        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-        
+        """Configurar sesión adaptativa"""
         providers = []
+        session_options = ort.SessionOptions()
+        
         if self.hardware_caps['has_cuda']:
-            providers.append('CUDAExecutionProvider')
-        providers.append('CPUExecutionProvider')
+            # Configuración GPU optimizada
+            cuda_provider = ('CUDAExecutionProvider', {
+                'device_id': 0,
+                'arena_extend_strategy': 'kSameAsRequested' if self.hardware_caps['cuda_memory_gb'] < 6 else 'kNextPowerOfTwo',
+                'gpu_mem_limit': int(self.hardware_caps['cuda_memory_gb'] * 0.6 * 1024**3),  # 60% de GPU
+                'cudnn_conv_algo_search': 'HEURISTIC',
+                'do_copy_in_default_stream': True,
+            })
+            providers.append(cuda_provider)
+            
+            session_options.execution_mode = ort.ExecutionMode.ORT_PARALLEL
+            session_options.inter_op_num_threads = min(2, self.hardware_caps['cpu_cores'] // 2)
+            session_options.intra_op_num_threads = min(4, self.hardware_caps['cpu_cores'])
+            
+            print("🚀 YOLO configurado para GPU de alto rendimiento")
+        else:
+            # Configuración CPU optimizada
+            session_options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+            session_options.inter_op_num_threads = 1
+            session_options.intra_op_num_threads = min(4, self.hardware_caps['cpu_cores'])
+            
+            print("🚀 YOLO configurado para CPU optimizado")
+            providers.append('CPUExecutionProvider')
+        
+        
+        session_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
         
         self.session = ort.InferenceSession(self.onnx_path, providers=providers, sess_options=session_options)
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
-        self.img_size = self.input_shape[2] if self.input_shape[2] > 0 else 640
-        
-        logger.info(f"✅ YOLO sesión configurada - Tamaño: {self.img_size}")
+        self.output_names = [output.name for output in self.session.get_outputs()]
+        self.img_size = self.input_shape[2]
     
-    def _warmup_model(self):
-        """Pre-calentar modelo"""
-        logger.info("🔥 Pre-calentando YOLO...")
+    def warmup(self):
+        """Pre-calentar con número de iteraciones adaptativo"""
+        print("🔥 Pre-calentando YOLO adaptativo...")
         dummy_input = np.random.rand(*self.input_shape).astype(np.float32)
-        for _ in range(3):
-            self.session.run(None, {self.input_name: dummy_input})
-        logger.info("✅ YOLO pre-calentado")
+        
+        warmup_iterations = 5 if self.hardware_caps['has_cuda'] else 3
+        for _ in range(warmup_iterations):
+            self.session.run(self.output_names, {self.input_name: dummy_input})
+        print("✅ YOLO adaptativo pre-calentado")
     
-    def preprocess_frame(self, frame: np.ndarray) -> Tuple[np.ndarray, float, int, int]:
-        """Preprocesamiento del frame"""
+    def preprocess_frame_adaptive(self, frame):
+        """Preprocesamiento adaptativo según hardware"""
         h, w = frame.shape[:2]
         scale = min(self.img_size / w, self.img_size / h)
         new_w, new_h = int(w * scale), int(h * scale)
         
-        resized = cv2.resize(frame, (new_w, new_h))
+        # Interpolación adaptativa
+        interpolation = cv2.INTER_LINEAR if self.hardware_caps['has_cuda'] else cv2.INTER_NEAREST
+        resized = cv2.resize(frame, (new_w, new_h), interpolation=interpolation)
+        
+        # Padding optimizado
         pad_w = (self.img_size - new_w) // 2
         pad_h = (self.img_size - new_h) // 2
         
         padded = cv2.copyMakeBorder(
-            resized, pad_h, self.img_size - new_h - pad_h,
+            resized, pad_h, self.img_size - new_h - pad_h, 
             pad_w, self.img_size - new_w - pad_w,
             cv2.BORDER_CONSTANT, value=(114, 114, 114)
         )
         
+        # Conversión optimizada
         rgb = cv2.cvtColor(padded, cv2.COLOR_BGR2RGB)
         normalized = rgb.astype(np.float32) / 255.0
         input_tensor = np.transpose(normalized, (2, 0, 1))[None, ...]
         
         return input_tensor, scale, pad_w, pad_h
     
-    async def detect_persons_async(self, frame: np.ndarray, conf_threshold: float = 0.25) -> List[List[int]]:
-        """Detección asíncrona que retorna bboxes de personas"""
+    def predict_persons(self, frame, conf_threshold=0.3):
+        """Detección adaptativa"""
         try:
-            input_tensor, scale, pad_w, pad_h = self.preprocess_frame(frame)
+            input_tensor, scale, pad_w, pad_h = self.preprocess_frame_adaptive(frame)
             
             # Inferencia
-            outputs = self.session.run(None, {self.input_name: input_tensor})
+            outputs = self.session.run(self.output_names, {self.input_name: input_tensor})
             
-            if not outputs or len(outputs) == 0:
-                return []
+            # Post-procesamiento optimizado
+            if len(outputs) == 0 or outputs[0].size == 0:
+                return SimpleNamespace(boxes=[[]], scores=[[]], labels=[[]])
             
-            detections = outputs[0][0] if len(outputs[0].shape) == 3 else outputs[0]
+            detections = outputs[0][0]
             
-            # Filtrar personas con confianza
-            conf_mask = detections[:, 4] >= conf_threshold
-            if not conf_mask.any():
-                return []
+            # Filtrado vectorizado
+            person_mask = (detections[:, 5] == 0) & (detections[:, 4] >= conf_threshold)
+            person_detections = detections[person_mask]
             
-            valid_detections = detections[conf_mask]
-            
-            # Filtrar solo clase persona (0)
-            if valid_detections.shape[1] > 5:
-                class_ids = np.argmax(valid_detections[:, 5:], axis=1)
-                person_mask = class_ids == 0
-                if not person_mask.any():
-                    return []
-                person_detections = valid_detections[person_mask]
-            else:
-                person_detections = valid_detections
+            if len(person_detections) == 0:
+                return SimpleNamespace(boxes=[[]], scores=[[]], labels=[[]])
             
             # Convertir coordenadas
-            h_frame, w_frame = frame.shape[:2]
-            bboxes = []
+            boxes = person_detections[:, :4].copy()
+            scores = person_detections[:, 4]
             
-            for detection in person_detections:
-                cx, cy, w, h = detection[:4]
-                
-                # Transformar coordenadas
-                cx = (cx - pad_w) / scale
-                cy = (cy - pad_h) / scale
-                w = w / scale
-                h = h / scale
-                
-                x1 = max(0, int(cx - w/2))
-                y1 = max(0, int(cy - h/2))
-                x2 = min(w_frame, int(cx + w/2))
-                y2 = min(h_frame, int(cy + h/2))
-                
-                if x2 > x1 and y2 > y1:
-                    bboxes.append([x1, y1, x2, y2])
+            # Transformación vectorizada
+            boxes[:, [0, 2]] = (boxes[:, [0, 2]] - pad_w) / scale
+            boxes[:, [1, 3]] = (boxes[:, [1, 3]] - pad_h) / scale
             
-            return bboxes
+            # Clipping
+            h, w = frame.shape[:2]
+            boxes[:, [0, 2]] = np.clip(boxes[:, [0, 2]], 0, w)
+            boxes[:, [1, 3]] = np.clip(boxes[:, [1, 3]], 0, h)
+            
+            return SimpleNamespace(
+                boxes=[boxes.astype(int)],
+                scores=[scores],
+                labels=[np.zeros(len(scores), dtype=int)]
+            )
             
         except Exception as e:
-            logger.error(f"❌ Error en detección YOLO: {e}")
-            return []
+            print(f"⚠️ Error en YOLO adaptativo: {e}")
+            return SimpleNamespace(boxes=[[]], scores=[[]], labels=[[]])
 
-class AsyncConvNeXtPoseProcessor:
-    """Procesador ConvNeXt asíncrono con cache inteligente"""
+class IntelligentPoseProcessor:
+    """Procesador de pose inteligente con optimizaciones adaptativas"""
     
     def __init__(self, pose_model, device, root_wrapper, transform, cfg, hardware_caps):
         self.pose_model = pose_model
@@ -256,118 +277,132 @@ class AsyncConvNeXtPoseProcessor:
         self.cfg = cfg
         self.hardware_caps = hardware_caps
         
-        # Cache inteligente
-        self.pose_cache = {}
+        # Cache adaptativo
+        self.bbox_cache = {}
         self.cache_timeout = hardware_caps['recommended_cache_timeout']
-        self.max_cache_size = 30
+        self.max_cache_size = 50 if hardware_caps['has_cuda'] else 30
         
-        # ThreadPool para RootNet
-        self.executor = ThreadPoolExecutor(max_workers=hardware_caps['recommended_workers'])
+        # ThreadPool adaptativo
+        max_workers = hardware_caps['recommended_workers']
+        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)
         
-        # Métricas
-        self.processing_times = deque(maxlen=50)
+        # Métricas de rendimiento
+        self.processing_times = deque(maxlen=20)
         self.cache_hits = 0
         self.cache_misses = 0
         
-        logger.info(f"✅ ConvNeXt Processor inicializado (cache={self.cache_timeout*1000:.0f}ms)")
+        print(f"✅ IntelligentPoseProcessor inicializado (workers={max_workers}, cache={self.cache_timeout*1000:.0f}ms)")
     
-    def _generate_cache_key(self, bbox: List[int], frame_time: float) -> str:
-        """Generar clave de cache inteligente"""
+    def _intelligent_cache_key(self, bbox, frame_time):
+        """Cache key inteligente con cuantización adaptativa"""
         x1, y1, x2, y2 = bbox
         
-        # Cuantización adaptativa
-        quantization = 20
-        x1_q = int(x1 / quantization) * quantization
-        y1_q = int(y1 / quantization) * quantization
-        x2_q = int(x2 / quantization) * quantization
-        y2_q = int(y2 / quantization) * quantization
+        # Cuantización adaptativa según rendimiento
+        if len(self.processing_times) > 5:
+            avg_time = sum(self.processing_times) / len(self.processing_times)
+            if avg_time > 0.4:  # Si es lento, cache más agresivo
+                quantization = 25
+            elif avg_time > 0.2:  # Rendimiento medio
+                quantization = 20
+            else:  # Rendimiento bueno
+                quantization = 15
+        else:
+            quantization = 20  # Default
         
+        x1_q, y1_q = int(x1 / quantization) * quantization, int(y1 / quantization) * quantization
+        x2_q, y2_q = int(x2 / quantization) * quantization, int(y2 / quantization) * quantization
         time_slot = int(frame_time / self.cache_timeout)
         
         return f"{x1_q}_{y1_q}_{x2_q}_{y2_q}_{time_slot}"
     
-    async def process_pose_async(self, frame: np.ndarray, bbox: List[int], frame_time: float) -> Optional[np.ndarray]:
-        """Procesamiento ConvNeXt asíncrono completo"""
+    def process_pose_intelligent(self, frame, bbox, frame_time):
+        """Procesamiento inteligente con cache adaptativo"""
         
-        # Cache check
-        cache_key = self._generate_cache_key(bbox, frame_time)
-        if cache_key in self.pose_cache:
-            cached_result, cached_time = self.pose_cache[cache_key]
+        # 1. Cache check inteligente
+        cache_key = self._intelligent_cache_key(bbox, frame_time)
+        if cache_key in self.bbox_cache:
+            cached_result, cached_time = self.bbox_cache[cache_key]
             if frame_time - cached_time < self.cache_timeout:
                 self.cache_hits += 1
                 return cached_result
         
         self.cache_misses += 1
-        start_time = time.time()
+        
+        # 2. Preparar bbox
+        x1, y1, x2, y2 = [int(coord) for coord in bbox]
+        bbox_array = np.array([x1, y1, x2 - x1, y2 - y1])
+        proc_bbox = pose_utils.process_bbox(bbox_array, frame.shape[1], frame.shape[0])
+        
+        if proc_bbox is None:
+            return None
         
         try:
-            # Preparar bbox para ConvNeXt
-            x1, y1, x2, y2 = bbox
-            bbox_array = np.array([x1, y1, x2 - x1, y2 - y1])
-            proc_bbox = pose_utils.process_bbox(bbox_array, frame.shape[1], frame.shape[0])
+            start_time = time.time()
             
-            if proc_bbox is None:
-                return None
-            
-            # Generar patch
+            # 3. Generar patch
             img_patch, img2bb_trans = generate_patch_image(
                 frame, proc_bbox, False, 1.0, 0.0, False
             )
             
-            # Preparar entrada para ConvNeXt
+            # 4. Preparar entrada con optimizaciones GPU
             inp = self.transform(img_patch).unsqueeze(0)
-            inp = inp.to(self.device, non_blocking=True if self.device.type == 'cuda' else False)
+            if self.device.type == 'cuda':
+                inp = inp.to(self.device, non_blocking=True)
+            else:
+                inp = inp.to(self.device)
             
-            # RootNet asíncrono
+            # 5. RootNet con timeout adaptativo
+            root_timeout = 0.05 if self.hardware_caps['has_cuda'] else 0.03
             root_future = self.executor.submit(
                 self.root_wrapper.predict_depth, frame, bbox_array
             )
             
-            # ConvNeXt inference
+            # 6. Inferencia ConvNeXt optimizada
             with torch.no_grad():
                 if self.device.type == 'cuda':
+                    # Stream paralelo para GPU
                     torch.cuda.synchronize()
                 
                 pose_3d = self.pose_model(inp)
                 
                 if self.device.type == 'cuda':
                     torch.cuda.synchronize()
-            
+                
             if pose_3d is not None:
                 pose_3d_np = pose_3d[0].cpu().numpy()
                 
-                # Obtener profundidad de RootNet
+                # 7. Obtener profundidad con timeout adaptativo
                 try:
-                    root_depth = root_future.result(timeout=0.05)
+                    root_depth = root_future.result(timeout=root_timeout)
                 except:
                     root_depth = 8000  # Fallback
                 
-                # Post-procesamiento
-                coords_2d = self._postprocess_pose(pose_3d_np, img2bb_trans, root_depth)
+                # 8. Post-procesamiento optimizado
+                coords_2d = self._postprocess_pose_optimized(pose_3d_np, img2bb_trans, root_depth)
                 
                 if coords_2d is not None:
+                    # 9. Cache update con limpieza inteligente
                     processing_time = time.time() - start_time
                     self.processing_times.append(processing_time)
                     
-                    # Cache update
-                    self._update_cache(cache_key, coords_2d, frame_time)
+                    self._update_cache_intelligent(cache_key, coords_2d, frame_time)
                     return coords_2d
-            
+                    
         except Exception as e:
-            logger.error(f"❌ Error en ConvNeXt processing: {e}")
+            print(f"⚠️ Error en pose inteligente: {e}")
             return None
         
         return None
     
-    def _postprocess_pose(self, pose_3d_raw: np.ndarray, img2bb_trans: np.ndarray, root_depth: float) -> np.ndarray:
-        """Post-procesamiento de pose ConvNeXt"""
+    def _postprocess_pose_optimized(self, pose_3d_raw, img2bb_trans, root_depth):
+        """Post-procesamiento optimizado"""
         pose_3d = pose_3d_raw.copy()
         
-        # Escalar coordenadas
+        # Transformación optimizada
         pose_3d[:, 0] = pose_3d[:, 0] / self.cfg.output_shape[1] * self.cfg.input_shape[1]
         pose_3d[:, 1] = pose_3d[:, 1] / self.cfg.output_shape[0] * self.cfg.input_shape[0]
         
-        # Transformación afín
+        # Transformación afín robusta
         pose_3d_xy1 = np.column_stack((pose_3d[:, :2], np.ones(len(pose_3d))))
         img2bb_trans_full = np.vstack((img2bb_trans, [0, 0, 1]))
         
@@ -379,198 +414,231 @@ class AsyncConvNeXtPoseProcessor:
             except:
                 return None
         
-        # Procesar profundidad
+        # Profundidad
         pose_3d[:, 2] = (pose_3d[:, 2] / self.cfg.depth_dim * 2 - 1) * (self.cfg.bbox_3d_shape[0]/2) + root_depth
         
-        return pose_3d[:, :2]  # Retornar solo coordenadas 2D
+        return pose_3d[:, :2]
     
-    def _update_cache(self, key: str, result: np.ndarray, timestamp: float):
-        """Actualizar cache con limpieza"""
-        self.pose_cache[key] = (result, timestamp)
+    def _update_cache_intelligent(self, key, result, timestamp):
+        """Update de cache inteligente"""
+        self.bbox_cache[key] = (result, timestamp)
         
-        # Limpieza del cache
-        if len(self.pose_cache) > self.max_cache_size:
+        # Limpieza adaptativa
+        if len(self.bbox_cache) > self.max_cache_size:
+            # Eliminar entradas más antiguas que 2x timeout
             cutoff_time = timestamp - self.cache_timeout * 2
-            old_keys = [k for k, (_, t) in self.pose_cache.items() if t < cutoff_time]
+            old_keys = [k for k, (_, t) in self.bbox_cache.items() if t < cutoff_time]
             
             for k in old_keys:
-                del self.pose_cache[k]
+                del self.bbox_cache[k]
             
-            # Si sigue lleno, eliminar más antiguos
-            if len(self.pose_cache) > self.max_cache_size:
-                sorted_items = sorted(self.pose_cache.items(), key=lambda x: x[1][1])
-                for k, _ in sorted_items[:len(sorted_items)//3]:
-                    del self.pose_cache[k]
+            # Si aún está lleno, eliminar las más antiguas
+            if len(self.bbox_cache) > self.max_cache_size:
+                sorted_items = sorted(self.bbox_cache.items(), key=lambda x: x[1][1])
+                for k, _ in sorted_items[:len(sorted_items)//3]:  # Eliminar 1/3
+                    del self.bbox_cache[k]
     
-    def get_stats(self) -> Dict[str, float]:
-        """Estadísticas del procesador"""
-        total = self.cache_hits + self.cache_misses
-        hit_rate = (self.cache_hits / total * 100) if total > 0 else 0
+    def get_performance_stats(self):
+        """Estadísticas de rendimiento avanzadas"""
+        total_requests = self.cache_hits + self.cache_misses
+        cache_hit_rate = (self.cache_hits / total_requests * 100) if total_requests > 0 else 0
         
-        avg_time = 0
+        avg_processing_time = 0
         if self.processing_times:
-            avg_time = sum(self.processing_times) / len(self.processing_times) * 1000
+            avg_processing_time = sum(self.processing_times) / len(self.processing_times) * 1000
         
         return {
-            'cache_hit_rate': hit_rate,
-            'avg_processing_time_ms': avg_time,
-            'cache_size': len(self.pose_cache)
+            'avg_processing_time_ms': avg_processing_time,
+            'cache_hit_rate': cache_hit_rate,
+            'cache_size': len(self.bbox_cache),
+            'total_requests': total_requests
         }
 
-class AsyncFrameProcessor:
-    """Procesador de frames completo: YOLO → ConvNeXt → Pose"""
+class AdaptiveFrameProcessor:
+    """Procesador de frames adaptativo"""
     
-    def __init__(self, yolo_detector, pose_processor, hardware_caps):
-        self.yolo_detector = yolo_detector
+    def __init__(self, yolo_pipeline, pose_processor, hardware_caps):
+        self.yolo_pipeline = yolo_pipeline
         self.pose_processor = pose_processor
         self.hardware_caps = hardware_caps
         
-        # Queues asíncronos
-        self.input_queue = asyncio.Queue(maxsize=3)
-        self.output_queue = asyncio.Queue(maxsize=3)
+        # Queue adaptativo
+        queue_size = 2 if hardware_caps['has_cuda'] else 1
+        self.input_queue = Queue(maxsize=queue_size)
+        self.output_queue = Queue(maxsize=queue_size)
         
-        # Control
+        # Frame skipping adaptativo
+        self.frame_skip_counter = 0
+        self.skip_every_n_frames = hardware_caps['recommended_frame_skip']
+        
+        # Control de threading
         self.processing = True
-        self.processor_task = None
+        self.processor_thread = threading.Thread(target=self._process_frames_adaptive)
+        self.processor_thread.daemon = True
+        self.processor_thread.start()
         
-        # Estadísticas
+        # Estadísticas avanzadas
+        self.processing_times = deque(maxlen=30)
         self.frame_count = 0
-        self.processing_times = deque(maxlen=50)
         
-        logger.info("✅ AsyncFrameProcessor inicializado")
+        print(f"✅ AdaptiveFrameProcessor inicializado (queue={queue_size}, skip=1/{self.skip_every_n_frames})")
     
-    async def start_processing(self):
-        """Iniciar procesamiento asíncrono"""
-        self.processor_task = asyncio.create_task(self._process_frames_loop())
-        logger.info("🚀 Procesamiento asíncrono iniciado")
-    
-    async def _process_frames_loop(self):
-        """Loop principal de procesamiento"""
+    def _process_frames_adaptive(self):
+        """Loop de procesamiento adaptativo"""
         while self.processing:
             try:
-                frame_data = await asyncio.wait_for(self.input_queue.get(), timeout=0.1)
-                
+                frame_data = self.input_queue.get(timeout=0.1)
                 if frame_data is None:
                     break
                 
                 frame, frame_time = frame_data
-                result = await self._process_single_frame(frame, frame_time)
+                start_time = time.time()
                 
-                # Limpiar queue de salida y añadir resultado
-                while not self.output_queue.empty():
-                    try:
-                        self.output_queue.get_nowait()
-                    except asyncio.QueueEmpty:
-                        break
+                # Procesar frame
+                result = self._process_single_frame_adaptive(frame, frame_time)
                 
-                await self.output_queue.put((result, frame_time))
+                # Estadísticas
+                processing_time = time.time() - start_time
+                self.processing_times.append(processing_time)
                 
-            except asyncio.TimeoutError:
+                # Enviar resultado sin bloqueo
+                try:
+                    # Limpiar queue de salida si está lleno
+                    while True:
+                        try:
+                            self.output_queue.get_nowait()
+                        except Empty:
+                            break
+                    
+                    self.output_queue.put((result, frame_time, processing_time), block=False)
+                except:
+                    pass
+                
+                # Adaptación dinámica de frame skipping
+                if len(self.processing_times) >= 10:
+                    avg_time = sum(list(self.processing_times)[-10:]) / 10
+                    
+                    if avg_time > 0.5:  # Muy lento
+                        self.skip_every_n_frames = min(5, self.skip_every_n_frames + 1)
+                    elif avg_time < 0.2:  # Rápido
+                        self.skip_every_n_frames = max(1, self.skip_every_n_frames - 1)
+                
+            except Empty:
                 continue
             except Exception as e:
-                logger.error(f"❌ Error en loop de procesamiento: {e}")
+                print(f"❌ Error en thread adaptativo: {e}")
     
-    async def _process_single_frame(self, frame: np.ndarray, frame_time: float) -> Dict:
-        """Procesar frame completo: YOLO + ConvNeXt"""
-        start_time = time.time()
-        
+    def _process_single_frame_adaptive(self, frame, frame_time):
+        """Procesar frame individual con optimizaciones"""
         try:
-            # 1. YOLO Detection
-            bboxes = await self.yolo_detector.detect_persons_async(frame)
+            # YOLO detection
+            detections = self.yolo_pipeline.predict_persons(frame, conf_threshold=0.25)
             
-            # 2. ConvNeXt Pose Estimation (solo mejor detección)
-            poses = []
+            # Extraer bboxes (tomar solo la mejor)
+            bboxes = []
+            if hasattr(detections, 'boxes') and len(detections.boxes[0]) > 0:
+                boxes = detections.boxes[0]
+                scores = detections.scores[0] if hasattr(detections, 'scores') else np.ones(len(boxes))
+                
+                if len(boxes) > 0:
+                    best_idx = np.argmax(scores)
+                    bboxes = [boxes[best_idx].tolist()]
+            
+            # Procesar pose
+            coords_list = []
             if bboxes:
-                # Tomar mejor bbox (primera en lista ya filtrada por confianza)
-                best_bbox = bboxes[0]
-                
-                # ConvNeXt processing
-                pose_coords = await self.pose_processor.process_pose_async(frame, best_bbox, frame_time)
-                
-                if pose_coords is not None:
-                    poses.append(pose_coords)
+                coords = self.pose_processor.process_pose_intelligent(frame, bboxes[0], frame_time)
+                if coords is not None:
+                    coords_list.append(coords)
             
-            processing_time = time.time() - start_time
-            self.processing_times.append(processing_time)
-            
-            return {
-                'bboxes': bboxes,
-                'poses': poses,
-                'processing_time': processing_time
-            }
+            return {'bboxes': bboxes, 'poses': coords_list}
             
         except Exception as e:
-            logger.error(f"❌ Error procesando frame: {e}")
-            return {'bboxes': [], 'poses': [], 'processing_time': 0}
+            print(f"⚠️ Error procesando frame adaptativo: {e}")
+            return {'bboxes': [], 'poses': []}
     
-    async def add_frame_async(self, frame: np.ndarray) -> bool:
-        """Agregar frame para procesamiento"""
+    def add_frame(self, frame):
+        """Agregar frame con skipping adaptativo"""
         self.frame_count += 1
-        frame_time = time.time()
         
-        try:
-            # Limpiar queue si está lleno
-            while not self.input_queue.empty():
-                try:
-                    self.input_queue.get_nowait()
-                except asyncio.QueueEmpty:
-                    break
-            
-            await self.input_queue.put((frame, frame_time))
+        # Frame skipping dinámico
+        if self.frame_count % self.skip_every_n_frames != 0:
             return True
-        except asyncio.QueueFull:
+        
+        frame_time = time.time()
+        try:
+            # Limpiar queue de entrada si está lleno
+            try:
+                self.input_queue.get_nowait()
+            except Empty:
+                pass
+            
+            self.input_queue.put((frame, frame_time), block=False)
+            return True
+        except:
             return False
     
-    async def get_result_async(self):
-        """Obtener resultado"""
+    def get_result(self):
+        """Obtener resultado sin bloqueo"""
         try:
-            return await asyncio.wait_for(self.output_queue.get(), timeout=0.001)
-        except asyncio.TimeoutError:
+            return self.output_queue.get_nowait()
+        except Empty:
             return None
     
-    def get_stats(self) -> Dict:
-        """Estadísticas completas"""
-        pose_stats = self.pose_processor.get_stats()
-        
-        stats = {
-            'frame_count': self.frame_count,
-            'queue_input_size': self.input_queue.qsize(),
-            'queue_output_size': self.output_queue.qsize()
-        }
+    def get_comprehensive_stats(self):
+        """Estadísticas comprehensivas"""
+        basic_stats = self.pose_processor.get_performance_stats()
         
         if self.processing_times:
-            stats['avg_total_time_ms'] = sum(self.processing_times) / len(self.processing_times) * 1000
+            avg_time = sum(self.processing_times) / len(self.processing_times)
+            basic_stats.update({
+                'queue_size': self.input_queue.qsize(),
+                'fps_estimate': 1.0 / avg_time if avg_time > 0 else 0,
+                'frames_processed': len(self.processing_times),
+                'current_skip_rate': self.skip_every_n_frames,
+                'total_frames': self.frame_count
+            })
         
-        stats.update(pose_stats)
-        return stats
+        return basic_stats
     
-    async def stop_async(self):
+    def stop(self):
         """Detener procesamiento"""
         self.processing = False
-        await self.input_queue.put(None)
-        if self.processor_task:
-            await self.processor_task
+        try:
+            self.input_queue.put(None, timeout=1)
+        except:
+            pass
+        self.processor_thread.join(timeout=3)
 
-async def setup_models_async(args):
-    """Configurar todos los modelos: YOLO + ConvNeXt + RootNet"""
-    logger.info("🚀 Configurando modelos completos...")
+def setup_models_adaptive(args):
+    """Configurar modelos con optimización adaptativa"""
+    print("🚀 Configurando modelos ADAPTATIVOS...")
     
+    # Detectar hardware
     hardware_caps = detect_hardware_capabilities()
     
-    # 1. Configurar ConvNeXt
+    # Configuración ConvNeXt (mantener original)
     cfg.input_shape = (256, 256)
     cfg.output_shape = (32, 32)
     cfg.depth_dim = 32
     cfg.bbox_3d_shape = (2000, 2000, 2000)
     
-    # 2. YOLO
-    onnx_path = convert_yolo_to_onnx_safe('yolov8n.pt')
-    if not onnx_path:
-        raise RuntimeError("No se pudo preparar YOLO")
+    # 1. YOLO adaptativo
+    if DEEPSPARSE_AVAILABLE:
+        try:
+            yolo_pipeline = Pipeline.create(task="yolo", model_path=args.yolo_model)
+            print("✅ DeepSparse YOLO cargado")
+        except:
+            yolo_pipeline = None
+    else:
+        yolo_pipeline = None
     
-    yolo_detector = ModernYOLODetector(onnx_path, hardware_caps)
+    if yolo_pipeline is None:
+        onnx_path = convert_yolo_to_onnx_optimized('yolov8n.pt')
+        yolo_pipeline = AdaptiveYOLODetector(onnx_path, hardware_caps)
+        print("✅ YOLO adaptativo cargado")
     
-    # 3. ConvNeXt Pose Model
+    # 2. ConvNeXt optimizado
     device = torch.device('cuda' if hardware_caps['has_cuda'] else 'cpu')
     pose_model = get_pose_net(cfg, is_train=False, joint_num=18)
     
@@ -579,35 +647,47 @@ async def setup_models_async(args):
     pose_model.load_state_dict(sd, strict=False)
     pose_model = pose_model.to(device).eval()
     
-    # Optimizaciones GPU
+    # Optimizaciones específicas de hardware
     if hardware_caps['has_cuda']:
         torch.backends.cudnn.benchmark = True
         torch.backends.cudnn.deterministic = False
+        torch.backends.cudnn.enabled = True
+        
+        if hardware_caps['cuda_memory_gb'] >= 6:
+            # Optimizaciones adicionales para GPUs potentes
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
     
-    logger.info(f"✅ ConvNeXt cargado en {device}")
+    print(f"✅ ConvNeXt adaptativo en {device}")
     
-    # 4. RootNet
+    # 3. RootNet
     root_wrapper = RootNetWrapper(args.rootnet_dir, args.rootnet_model)
     root_wrapper.load_model(use_gpu=hardware_caps['has_cuda'])
-    logger.info("✅ RootNet cargado")
+    print("✅ RootNet cargado")
     
-    # 5. Transform
+    # 4. Transformación
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize(mean=cfg.pixel_mean, std=cfg.pixel_std),
     ])
     
-    # 6. ConvNeXt Processor
-    pose_processor = AsyncConvNeXtPoseProcessor(
-        pose_model, device, root_wrapper, transform, cfg, hardware_caps
-    )
+    return yolo_pipeline, pose_model, device, root_wrapper, transform, hardware_caps
+def optimize_for_cpu():
+    """Optimizaciones específicas para CPU"""
+    import torch
+    torch.set_num_threads(6)  # Usar la mitad de tus cores
+    torch.set_num_interop_threads(2)
     
-    return yolo_detector, pose_processor, hardware_caps
-
-async def main_async():
-    """Main asíncrono completo"""
-    parser = argparse.ArgumentParser(description="ConvNeXt v4 COMPLETO - YOLO + ConvNeXt + RootNet")
+    # Configuraciones específicas CPU
+    os.environ['OMP_NUM_THREADS'] = '6'
+    os.environ['MKL_NUM_THREADS'] = '6'
+def main():
+    optimize_for_cpu()
+    parser = argparse.ArgumentParser(description="ConvNeXt FINAL - Adaptativo y Optimizado")
     parser.add_argument('--input', type=str, default='0', help='Video source')
+    parser.add_argument('--yolo-model', type=str, 
+                        default='zoo:cv/detection/yolov5-s/pytorch/ultralytics/coco/pruned65_quant-none',
+                        help='YOLO model path')
     parser.add_argument('--pose-model', type=str, required=True, help='ConvNeXt checkpoint')
     parser.add_argument('--rootnet-dir', type=str, 
                         default='/home/fabri/3DMPPE_ROOTNET_RELEASE',
@@ -617,14 +697,18 @@ async def main_async():
                         help='RootNet checkpoint')
     args = parser.parse_args()
     
-    # Setup completo
-    yolo_detector, pose_processor, hardware_caps = await setup_models_async(args)
+    # Configurar modelos adaptativos
+    yolo_pipeline, pose_model, device, root_wrapper, transform, hardware_caps = setup_models_adaptive(args)
     
-    # Frame processor
-    frame_processor = AsyncFrameProcessor(yolo_detector, pose_processor, hardware_caps)
-    await frame_processor.start_processing()
+    # Procesador inteligente
+    pose_processor = IntelligentPoseProcessor(
+        pose_model, device, root_wrapper, transform, cfg, hardware_caps
+    )
     
-    # Esqueleto para dibujo
+    # Frame processor adaptativo
+    frame_processor = AdaptiveFrameProcessor(yolo_pipeline, pose_processor, hardware_caps)
+    
+    # Esqueleto optimizado
     skeleton = [
         (10, 9), (9, 8), (8, 11), (8, 14),
         (11, 12), (12, 13), (14, 15), (15, 16),
@@ -638,50 +722,58 @@ async def main_async():
     elif args.input.isdigit():
         cap = cv2.VideoCapture(int(args.input))
     else:
-        cap = cv2.VideoCapture(f"tcp://{args.input}:5000")
+        if args.input.startswith('tcp://'):
+            cap = cv2.VideoCapture(args.input)
+        else:
+            cap = cv2.VideoCapture(f"tcp://{args.input}:5000")
     
     if not cap.isOpened():
-        logger.error(f"❌ No se pudo abrir video: {args.input}")
+        print(f"❌ No se pudo abrir video: {args.input}")
         return
     
+    # Optimizaciones de captura
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-    logger.info("🚀 Demo ConvNeXt v4 COMPLETO iniciado. Presione 'q' para salir.")
+    if hardware_caps['has_cuda']:
+        cap.set(cv2.CAP_PROP_FPS, 30)
+    
+    print("🚀 Demo FINAL ADAPTATIVO iniciado. Presione 'q' para salir.")
     
     # Variables de rendimiento
     frame_count = 0
-    display_fps_counter = deque(maxlen=30)
+    fps_counter = deque(maxlen=30)
     last_poses = []
     last_result_time = time.time()
+    last_stats_time = time.time()
     
     try:
         while True:
-            loop_start = time.time()
+            frame_start = time.time()
             
             ret, frame = cap.read()
             if not ret:
                 break
             
-            # Procesar frame
-            await frame_processor.add_frame_async(frame)
+            # Agregar frame para procesamiento
+            frame_processor.add_frame(frame)
             
-            # Obtener resultado
-            result = await frame_processor.get_result_async()
+            # Obtener resultado más reciente
+            result = frame_processor.get_result()
             if result:
-                result_data, result_time = result
+                result_data, result_time, processing_time = result
                 last_poses = result_data.get('poses', [])
                 last_result_time = result_time
                 
                 # Dibujar bboxes
                 for bbox in result_data.get('bboxes', []):
-                    x1, y1, x2, y2 = bbox
+                    x1, y1, x2, y2 = [int(coord) for coord in bbox]
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
             
-            # DIBUJAR ESQUELETOS COMPLETOS
+            # Dibujar esqueletos
             for pose_coords in last_poses:
                 if pose_coords is not None:
                     pose_coords = np.clip(pose_coords, 0, [frame.shape[1]-1, frame.shape[0]-1])
                     
-                    # Dibujar conexiones del esqueleto
+                    # Dibujar conexiones
                     for i, j in skeleton:
                         if i < len(pose_coords) and j < len(pose_coords):
                             pt1 = tuple(map(int, pose_coords[i]))
@@ -693,60 +785,66 @@ async def main_async():
                         cv2.circle(frame, tuple(map(int, point)), 3, (0, 255, 0), -1)
             
             # Estadísticas en pantalla
-            loop_time = time.time() - loop_start
-            display_fps_counter.append(1.0 / max(loop_time, 1e-6))
+            frame_time = time.time() - frame_start
+            fps_counter.append(1.0 / max(frame_time, 1e-6))
             
-            if display_fps_counter:
-                display_fps = sum(display_fps_counter) / len(display_fps_counter)
-                cv2.putText(frame, f"FPS: {display_fps:.1f}", (10, 30),
-                          cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
+            if fps_counter:
+                fps = sum(fps_counter) / len(fps_counter)
+                cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30),
+                          cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
             
-            # Estadísticas del sistema
-            stats = frame_processor.get_stats()
-            proc_time = stats.get('avg_total_time_ms', 0)
-            hit_rate = stats.get('cache_hit_rate', 0)
+            # Estadísticas avanzadas
+            stats = frame_processor.get_comprehensive_stats()
+            proc_time = stats.get('avg_processing_time_ms', 0)
+            cache_hit_rate = stats.get('cache_hit_rate', 0)
             
-            cv2.putText(frame, f"Processing: {proc_time:.1f}ms", (10, 70),
+            # Color coding para latencia
+            color = (0, 255, 0) if proc_time < 200 else (0, 165, 255) if proc_time < 400 else (0, 0, 255)
+            
+            cv2.putText(frame, f"Proc: {proc_time:.1f}ms", (10, 70),
+                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+            cv2.putText(frame, f"Cache: {cache_hit_rate:.1f}%", (10, 110),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
-            cv2.putText(frame, f"Cache: {hit_rate:.1f}%", (10, 110),
-                      cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
             
-            visual_lag = (time.time() - last_result_time) * 1000
-            cv2.putText(frame, f"Visual Lag: {visual_lag:.0f}ms", (10, 150),
+            # Mostrar latencia visual
+            visual_latency = (time.time() - last_result_time) * 1000
+            cv2.putText(frame, f"Visual Lag: {visual_latency:.0f}ms", (10, 150),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             
-            hw_info = f"GPU-{hardware_caps['cuda_memory_gb']:.1f}GB" if hardware_caps['has_cuda'] else "CPU"
-            cv2.putText(frame, f"v4-COMPLETE ({hw_info})", (10, 190),
+            # Información del hardware
+            hw_info = "GPU" if hardware_caps['has_cuda'] else "CPU"
+            cv2.putText(frame, f"FINAL ADAPTIVE ({hw_info})", (10, 190),
                       cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 0, 255), 2)
             
-            cv2.imshow("ConvNeXt v4 - COMPLETO", frame)
+            cv2.imshow("ConvNeXt FINAL - Adaptive Optimized", frame)
             
             frame_count += 1
             
-            # Log estadísticas cada 60 frames
+            # Estadísticas detalladas cada 60 frames
             if frame_count % 60 == 0:
-                avg_fps = sum(display_fps_counter) / len(display_fps_counter) if display_fps_counter else 0
-                logger.info(f"📊 Frame {frame_count}: FPS={avg_fps:.1f}, "
-                           f"Proc={proc_time:.1f}ms, Cache={hit_rate:.1f}%, "
-                           f"Lag={visual_lag:.0f}ms")
+                current_time = time.time()
+                elapsed = current_time - last_stats_time
+                
+                avg_fps = sum(fps_counter) / len(fps_counter) if fps_counter else 0
+                
+                print(f"📊 Frame {frame_count}:")
+                print(f"   Display FPS: {avg_fps:.1f}")
+                print(f"   Processing: {proc_time:.1f}ms")
+                print(f"   Cache Hit Rate: {cache_hit_rate:.1f}%")
+                print(f"   Visual Lag: {visual_latency:.0f}ms")
+                print(f"   Skip Rate: 1/{stats.get('current_skip_rate', 1)}")
+                print(f"   Hardware: {hw_info} ({hardware_caps.get('cuda_memory_gb', 0):.1f}GB)")
+                
+                last_stats_time = current_time
             
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
-    
+                
     finally:
-        await frame_processor.stop_async()
+        frame_processor.stop()
         cap.release()
         cv2.destroyAllWindows()
-        logger.info("🏁 Demo v4 COMPLETO finalizado")
-
-def main():
-    """Función principal"""
-    try:
-        asyncio.run(main_async())
-    except KeyboardInterrupt:
-        logger.info("\n🛑 Detenido por usuario")
-    except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        print("🏁 Demo final adaptativo finalizado")
 
 if __name__ == "__main__":
     main()
