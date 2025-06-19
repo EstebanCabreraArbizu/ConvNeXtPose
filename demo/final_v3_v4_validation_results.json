@@ -1,0 +1,87 @@
+{
+  "dependencies": {
+    "passed": true,
+    "available": {
+      "tensorflow": "2.11.0",
+      "torch": "1.13.1+cu117",
+      "onnx": "1.13.0",
+      "onnx_tf": "1.10.0",
+      "cv2": "4.7.0",
+      "numpy": "1.23.5"
+    },
+    "missing": []
+  },
+  "v3_test": {
+    "available": true,
+    "import_success": true,
+    "inference_time": 102.18,
+    "error": null,
+    "model_type": "PyTorch",
+    "conversion_support": "Limited"
+  },
+  "v4_test": {
+    "available": false,
+    "import_success": false,
+    "corrected_converter": false,
+    "inference_time": null,
+    "conversion_time": null,
+    "model_size_reduction": null,
+    "error": "cannot import name 'PoseEstimationSystem' from 'convnext_realtime_v4_threading_fixed' (/home/fabri/ConvNeXtPose/demo/convnext_realtime_v4_threading_fixed.py)"
+  },
+  "conversion_quality": {
+    "weight_preservation": true,
+    "output_compatibility": true,
+    "numerical_stability": true,
+    "inference_comparison": {
+      "tflite_output_shape": [
+        1,
+        18,
+        3,
+        32
+      ],
+      "tflite_output_range": [
+        0.0,
+        2.5053303241729736
+      ],
+      "tflite_output_mean": 0.4962933361530304,
+      "tflite_output_std": 0.5927571654319763
+    },
+    "error": null
+  },
+  "comparison": {
+    "winner": null,
+    "performance_improvement": null,
+    "feature_comparison": {
+      "Model Support": {
+        "V3": "PyTorch",
+        "V4": "Unknown"
+      },
+      "Conversion Support": {
+        "V3": "Limited",
+        "V4": "Unknown"
+      },
+      "System Availability": {
+        "V3": "\u2705",
+        "V4": "\u274c"
+      },
+      "Corrected Converter": {
+        "V3": "\u274c Not Available",
+        "V4": "\u274c Not Available"
+      }
+    },
+    "recommendations": [],
+    "error": "'>' not supported between instances of 'NoneType' and 'int'"
+  },
+  "models_info": {
+    "model_opt_S_optimized.onnx": {
+      "path": "/home/fabri/ConvNeXtPose/exports/model_opt_S_optimized.onnx",
+      "size_mb": 28.39,
+      "exists": true
+    },
+    "model_opt_S_corrected_onnx_tf.tflite": {
+      "path": "/home/fabri/ConvNeXtPose/exports/model_opt_S_corrected_onnx_tf.tflite",
+      "size_mb": 7.46,
+      "exists": true
+    }
+  }
+}
