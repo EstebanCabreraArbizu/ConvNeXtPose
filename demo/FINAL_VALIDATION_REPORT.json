@@ -1,0 +1,151 @@
+{
+  "report_date": "2025-06-22T13:21:37.199736",
+  "project": "ConvNeXtPose - ONNX/TFLite Backend Implementation",
+  "version": "v4.0 Final",
+  "status": "COMPLETED",
+  "model_files": {
+    "pytorch": {
+      "available": true,
+      "path": "D:\\Repository-Projects\\ConvNeXtPose\\demo\\ConvNeXtPose_S.tar",
+      "size": 89562741
+    },
+    "onnx_256": {
+      "available_count": 4,
+      "total_required": 4,
+      "models": [
+        {
+          "name": "model_opt_S_optimized.onnx",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_optimized.onnx",
+          "size": 29768303
+        },
+        {
+          "name": "model_S.onnx",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_S.onnx",
+          "size": 29766958
+        },
+        {
+          "name": "model_opt_S_optimized_256.onnx",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_optimized_256.onnx",
+          "size": 29768303
+        },
+        {
+          "name": "model_S_256.onnx",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_S_256.onnx",
+          "size": 29768303
+        }
+      ]
+    },
+    "tflite_256": {
+      "available_count": 7,
+      "total_required": 7,
+      "models": [
+        {
+          "name": "model_opt_S_optimized.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_optimized.tflite",
+          "size": 7831664
+        },
+        {
+          "name": "model_opt_S_configurable.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_configurable.tflite",
+          "size": 7831720
+        },
+        {
+          "name": "model_opt_S_enhanced.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_enhanced.tflite",
+          "size": 7831720
+        },
+        {
+          "name": "model_opt_S_fixed.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_fixed.tflite",
+          "size": 29774768
+        },
+        {
+          "name": "model_opt_S_simple.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_simple.tflite",
+          "size": 29774704
+        },
+        {
+          "name": "model_opt_S_v5_configured.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_opt_S_v5_configured.tflite",
+          "size": 7831720
+        },
+        {
+          "name": "model_working_256.tflite",
+          "path": "D:\\Repository-Projects\\ConvNeXtPose\\exports\\model_working_256.tflite",
+          "size": 29774768
+        }
+      ]
+    }
+  },
+  "backend_tests": {
+    "pytorch": {
+      "functional": true,
+      "input_size": "256x256",
+      "output_shape": "(1, 18, 3)",
+      "avg_inference_time": "126.8ms",
+      "status": "✅ Working"
+    },
+    "onnx": {
+      "functional": true,
+      "input_size": "256x256",
+      "output_shape": "(1, 18, 3)",
+      "avg_inference_time": "40.8ms",
+      "status": "✅ Working"
+    },
+    "tflite": {
+      "functional": true,
+      "input_size": "256x256",
+      "output_shape": "(1, 18, 3)",
+      "avg_inference_time": "197.9ms",
+      "status": "✅ Working"
+    }
+  },
+  "analysis": {
+    "models_available": {
+      "pytorch": true,
+      "onnx_256": true,
+      "tflite_256": true,
+      "all_available": true
+    },
+    "backends_functional": {
+      "pytorch": true,
+      "onnx": true,
+      "tflite": true,
+      "all_working": true
+    },
+    "input_size_consistency": "256x256",
+    "output_shape_consistency": "(1, 18, 3)",
+    "ready_for_production": true
+  },
+  "performance_ranking": [
+    {
+      "rank": 1,
+      "backend": "onnx",
+      "time": "40.8ms"
+    },
+    {
+      "rank": 2,
+      "backend": "pytorch",
+      "time": "126.8ms"
+    },
+    {
+      "rank": 3,
+      "backend": "tflite",
+      "time": "197.9ms"
+    }
+  ],
+  "recommendations": {
+    "for_production": [
+      "Use ONNX backend for best performance (fastest inference)",
+      "All backends are ready and consistently use 256x256 input",
+      "No additional model conversion needed - existing models work perfectly",
+      "TFLite backend available for mobile deployment if needed"
+    ],
+    "for_maintenance": [
+      "Keep existing 256x256 models - they are correct and working",
+      "No need to recreate models unless architecture changes",
+      "Monitor performance periodically",
+      "Document which specific model files to use for each backend"
+    ]
+  }
+}

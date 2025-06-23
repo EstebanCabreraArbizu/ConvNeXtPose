@@ -1,0 +1,41 @@
+{
+  "pytorch": {
+    "backend": "pytorch",
+    "status": "success",
+    "active_backend": "pytorch",
+    "fps": 36.81387345336326,
+    "avg_time_ms": 27.16367244720459,
+    "min_time_ms": 21.936416625976562,
+    "max_time_ms": 35.761117935180664,
+    "successful_inferences": 20,
+    "total_iterations": 20,
+    "success_rate": 100.0,
+    "init_time": 1.0945098400115967
+  },
+  "onnx": {
+    "backend": "onnx",
+    "status": "success",
+    "active_backend": "onnx",
+    "fps": 81.1265600595736,
+    "avg_time_ms": 12.326419353485107,
+    "min_time_ms": 7.844686508178711,
+    "max_time_ms": 17.568588256835938,
+    "successful_inferences": 20,
+    "total_iterations": 20,
+    "success_rate": 100.0,
+    "init_time": 0.32978081703186035
+  },
+  "tflite": {
+    "backend": "tflite",
+    "status": "success",
+    "active_backend": "tflite",
+    "fps": 8.05719076648317,
+    "avg_time_ms": 124.11273717880249,
+    "min_time_ms": 102.35786437988281,
+    "max_time_ms": 196.55108451843262,
+    "successful_inferences": 20,
+    "total_iterations": 20,
+    "success_rate": 100.0,
+    "init_time": 0.13215875625610352
+  }
+}

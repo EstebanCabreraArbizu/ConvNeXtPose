@@ -1,0 +1,55 @@
+{
+  "test_info": {
+    "timestamp": "2025-06-21T11:19:01.471003",
+    "total_tests": 2,
+    "successful_tests": 2
+  },
+  "results": [
+    {
+      "config_name": "balanced_baseline",
+      "preset": "balanced",
+      "backend": "pytorch",
+      "duration": 30,
+      "start_time": 1750522741.472646,
+      "end_time": 1750522771.5299246,
+      "fps_values": [
+        4.6,
+        4.5,
+        4.5,
+        4.5
+      ],
+      "avg_fps": 4.525,
+      "max_fps": 4.6,
+      "min_fps": 4.5,
+      "success": true,
+      "description": "Configuración balanced baseline",
+      "stdout_sample": "",
+      "stderr_sample": "dware: cpu_only\n2025-06-21 11:19:05,714 - INFO -    Backend: pytorch\n2025-06-21 11:19:07,112 - INFO - \\u2705 V4 Clean started. Press 'q' to quit, 's' for stats\n2025-06-21 11:19:12,212 - INFO - \\U0001f4ca Stats: FPS=4.6, Poses=1, Backend=pytorch\n2025-06-21 11:19:17,260 - INFO - \\U0001f4ca Stats: FPS=4.5, Poses=1, Backend=pytorch\n2025-06-21 11:19:22,534 - INFO - \\U0001f4ca Stats: FPS=4.5, Poses=1, Backend=pytorch\n2025-06-21 11:19:27,817 - INFO - \\U0001f4ca Stats: FPS=4.5, Poses=1, Backend=pytorch\n"
+    },
+    {
+      "config_name": "high_performance_baseline",
+      "preset": "high_performance",
+      "backend": "pytorch",
+      "duration": 30,
+      "start_time": 1750522776.531,
+      "end_time": 1750522806.591848,
+      "fps_values": [
+        3.6,
+        3.5,
+        3.2,
+        3.0
+      ],
+      "avg_fps": 3.325,
+      "max_fps": 3.6,
+      "min_fps": 3.0,
+      "success": true,
+      "description": "Configuración high_performance baseline",
+      "stdout_sample": "",
+      "stderr_sample": "dware: cpu_only\n2025-06-21 11:19:40,604 - INFO -    Backend: pytorch\n2025-06-21 11:19:41,795 - INFO - \\u2705 V4 Clean started. Press 'q' to quit, 's' for stats\n2025-06-21 11:19:46,852 - INFO - \\U0001f4ca Stats: FPS=3.6, Poses=1, Backend=pytorch\n2025-06-21 11:19:52,075 - INFO - \\U0001f4ca Stats: FPS=3.5, Poses=1, Backend=pytorch\n2025-06-21 11:19:57,136 - INFO - \\U0001f4ca Stats: FPS=3.2, Poses=1, Backend=pytorch\n2025-06-21 11:20:02,299 - INFO - \\U0001f4ca Stats: FPS=3.0, Poses=2, Backend=pytorch\n"
+    }
+  ],
+  "summary": {
+    "best_config": "balanced_baseline",
+    "best_fps": 4.525
+  }
+}
