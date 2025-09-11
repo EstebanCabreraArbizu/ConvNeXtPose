@@ -10,6 +10,7 @@ import matplotlib as mpl
 from config import cfg
 
 def vis_keypoints(img, kps, kps_lines, kp_thresh=0.4, alpha=1):
+
     # Convert from plt 0-1 RGBA colors to 0-255 BGR colors for opencv.
     cmap = plt.get_cmap('rainbow')
     colors = [cmap(i) for i in np.linspace(0, 1, len(kps_lines) + 2)]
@@ -40,8 +41,8 @@ def vis_keypoints(img, kps, kps_lines, kp_thresh=0.4, alpha=1):
     # Blend the keypoints.
     return cv2.addWeighted(img, 1.0 - alpha, kp_mask, alpha, 0)
 
-def vis_3d_skeleton(kpt_3d, kpt_3d_vis,kps_lines, filename=None):
-    
+def vis_3d_skeleton(kpt_3d, kpt_3d_vis, kps_lines, filename=None):
+
     fig = plt.figure()
     ax = fig.add_subplot(111, projection='3d')
 
@@ -100,9 +101,9 @@ def vis_3d_multiple_skeleton(kpt_3d, kpt_3d_vis, kps_lines, filename=None):
             if kpt_3d_vis[n,i1,0] > 0 and kpt_3d_vis[n,i2,0] > 0:
                 ax.plot(x, z, -y, c=colors[l], linewidth=2)
             if kpt_3d_vis[n,i1,0] > 0:
-                ax.scatter(kpt_3d[n,i1,0], kpt_3d[n,i1,2], -kpt_3d[n,i1,1], color=colors[l], marker='o')
+                ax.scatter(kpt_3d[n,i1,0], kpt_3d[n,i1,2], -kpt_3d[n,i1,1], c=colors[l], marker='o')
             if kpt_3d_vis[n,i2,0] > 0:
-                ax.scatter(kpt_3d[n,i2,0], kpt_3d[n,i2,2], -kpt_3d[n,i2,1], color=colors[l], marker='o')
+                ax.scatter(kpt_3d[n,i2,0], kpt_3d[n,i2,2], -kpt_3d[n,i2,1], c=colors[l], marker='o')
 
     if filename is None:
         ax.set_title('3D vis')
@@ -114,6 +115,6 @@ def vis_3d_multiple_skeleton(kpt_3d, kpt_3d_vis, kps_lines, filename=None):
     ax.set_zlabel('Y Label')
     ax.legend()
     
-    plt.show()
+    plt.savefig("output_pose_3d.jpg")
     cv2.waitKey(0)
 

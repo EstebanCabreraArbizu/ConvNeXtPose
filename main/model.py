@@ -39,15 +39,12 @@ class HeadNet(nn.Module):
         self.inplanes = in_channel # 2048, 768
         super(HeadNet, self).__init__()
 
-        self.depth_dim = cfg.depth_dim
-        self.output_shape = cfg.output_shape
-        self.depth = cfg.depth 
-        self.deconv_layers_1 = DeConv(inplanes=self.inplanes,planes=self.depth, kernel_size = 3)
-        self.deconv_layers_2 = DeConv(inplanes=self.depth, planes=self.depth, kernel_size = 3)
-        self.deconv_layers_3 = DeConv(inplanes=self.depth, planes=self.depth, kernel_size = 3, up = False)
+        self.deconv_layers_1 = DeConv(inplanes=self.inplanes,planes=cfg.depth, kernel_size = 3)
+        self.deconv_layers_2 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size = 3)
+        self.deconv_layers_3 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size = 3, up = False)
         self.final_layer = nn.Conv2d(
-            in_channels=self.depth,
-            out_channels=joint_num * self.depth_dim,
+            in_channels=cfg.depth,
+            out_channels=joint_num * cfg.depth_dim,
             kernel_size=1,
             stride=1,
             padding=0
@@ -71,65 +68,55 @@ class HeadNet(nn.Module):
             nn.init.constant_(m.bias, 0)
 
 
-def soft_argmax(heatmaps: torch.Tensor,
-                joint_num: int,
-                depth_dim: int,
-                output_shape: tuple[int,int]) -> torch.Tensor:
-    B = heatmaps.shape[0]
-    if heatmaps.dim() == 4:
-        _,_,H,W = heatmaps.shape
-    else:
-        raise ValueError(f"Heatmaps should be 4D tensor, but got {heatmaps.dim()}D tensor")
-    
-    H_out, W_out = output_shape if (H != output_shape[0] or W != output_shape[1]) else (H, W)
-    heat = heatmaps.view(B, joint_num, depth_dim, H_out, W_out)
-    
-    # 🔥 AÑADIR SOLO ESTA NORMALIZACIÓN:
-    heat_flat = heat.view(B, joint_num, -1)  # [B, joint_num, depth*H*W]
-    heat_flat = heat_flat - heat_flat.min(dim=2, keepdim=True)[0]  # Hacer positivo
-    heat_soft = torch.softmax(heat_flat, dim=2)  # Aplicar softmax
-    heat = heat_soft.view(B, joint_num, depth_dim, H_out, W_out)  # Reshape back
-    # 🔥 FIN DE LA CORRECCIÓN
-    
-    accu_x = heat.sum(dim=(2,3))
-    accu_y = heat.sum(dim=(2,4))
-    accu_z = heat.sum(dim=(3,4))
+def soft_argmax(heatmaps, joint_num):
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    heatmaps = heatmaps.reshape((-1, joint_num, cfg.depth_dim*cfg.output_shape[0]*cfg.output_shape[1]))
+    heatmaps = F.softmax(heatmaps, 2)
+    heatmaps = heatmaps.reshape((-1, joint_num, cfg.depth_dim, cfg.output_shape[0], cfg.output_shape[1]))
 
-    device = heatmaps.device
-    accu_x = (accu_x * torch.arange(W_out, device = device)[None,None,:]).sum(dim=2, keepdim=True)
-    accu_y = (accu_y * torch.arange(H_out, device = device)[None,None,:]).sum(dim=2, keepdim=True)
-    accu_z = (accu_z * torch.arange(depth_dim, device = device)[None,None,:]).sum(dim=2, keepdim=True)
+    accu_x = heatmaps.sum(dim=(2,3))
+    accu_y = heatmaps.sum(dim=(2,4))
+    accu_z = heatmaps.sum(dim=(3,4))
 
-    coord_out = torch.cat([accu_x, accu_y, accu_z], dim=2)
+    accu_x = accu_x * torch.arange(cfg.output_shape[1]).float().to(device)[None,None,:]
+    accu_y = accu_y * torch.arange(cfg.output_shape[0]).float().to(device)[None,None,:]
+    accu_z = accu_z * torch.arange(cfg.depth_dim).float().to(device)[None,None,:]
+
+    accu_x = accu_x.sum(dim=2, keepdim=True)
+    accu_y = accu_y.sum(dim=2, keepdim=True)
+    accu_z = accu_z.sum(dim=2, keepdim=True)
+
+    coord_out = torch.cat((accu_x, accu_y, accu_z), dim=2)
 
     return coord_out
 
 class ConvNeXtPose(nn.Module):
-    def __init__(self, backbone,joint_num, head, cfg):
+    def __init__(self, backbone,joint_num, head):
         super(ConvNeXtPose, self).__init__()
         self.backbone = backbone
         self.head = head
         self.joint_num = joint_num
-        self.depth_dim = cfg.depth_dim
-        self.output_shape = (cfg.output_shape[0], cfg.output_shape[1])
         # self.loss = nn.MSELoss()
 
-    def forward(self, input_img):
+    def forward(self, input_img, target=None):
         hm= self.backbone(input_img)
-        if self.head is not None:
+        if self.head != None:
             hm = self.head(hm)
-        coord = soft_argmax(hm, self.joint_num, self.depth_dim, self.output_shape)
+        coord = soft_argmax(hm, self.joint_num)
         
-        return coord
-    @torch.jit.ignore
-    def compute_loss(self, 
-                     coord: torch.Tensor, 
-                     target_coord: torch.Tensor, 
-                     target_vis: torch.Tensor, 
-                     target_have_depth: torch.Tensor) -> torch.Tensor:
-        loss_coord = torch.abs(coord - target_coord) * target_vis
-        loss_coord = (loss_coord[:,:,0] + loss_coord[:,:,1] + loss_coord[:,:,2] * target_have_depth) / 3.0
-        return loss_coord
+        if target is None:
+            return coord
+        else:
+            target_coord = target['coord']
+            target_vis = target['vis']
+            target_have_depth = target['have_depth']
+        
+            ## coordinate loss
+            loss_coord = torch.abs(coord - target_coord) * target_vis
+            # loss_coord = self.loss(coord, target_coord) * target_vis
+            loss_coord = (loss_coord[:,:,0] + loss_coord[:,:,1] + loss_coord[:,:,2] * target_have_depth)/3.
+            return loss_coord
+
 def get_pose_net(cfg, is_train, joint_num):
     drop_rate = 0
     if is_train:
@@ -137,6 +124,6 @@ def get_pose_net(cfg, is_train, joint_num):
     backbone = ConvNeXt_BN(depths=cfg.backbone_cfg[0], dims=cfg.backbone_cfg[1],drop_path_rate=drop_rate) 
     head_net = HeadNet(joint_num, in_channel = cfg.backbone_cfg[1][-1])
 
-    model = ConvNeXtPose(backbone, joint_num, head =head_net, cfg = cfg)
+    model = ConvNeXtPose(backbone, joint_num, head =head_net)
     return model
 
