@@ -14,3 +14,11 @@ data/MPII/annotations/
 *.jpg
 settings.json
 yolo*.*
+*.mp4
+yolo*/
+*.npz
+*.json
+*.tar
+test*
+*.pyc
+calibration*
