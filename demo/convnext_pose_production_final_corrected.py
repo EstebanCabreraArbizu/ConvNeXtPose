@@ -928,6 +928,56 @@ class RobustPoseProcessor:
                 logger.warning(f"⚠️ Error procesando persona: {e}")
                 self._error_logged = True
             return None
+    
+    def _get_pose_with_relative_depth(self, frame: np.ndarray, bbox: List[int]) -> Optional[np.ndarray]:
+        """
+        Obtener pose con profundidad relativa (x, y, z_relative)
+        Siguiendo exactamente el pipeline del demo.py ANTES de aplicar root_depth
+        """
+        try:
+            if len(bbox) < 4:
+                return None
+            
+            x1, y1, x2, y2 = bbox
+            if x2 <= x1 or y2 <= y1:
+                return None
+            
+            # Convertir bbox format para process_bbox
+            bbox_array = np.array([x1, y1, x2 - x1, y2 - y1])  # [x, y, width, height]
+            processed_bbox = process_bbox(bbox_array, frame.shape[1], frame.shape[0])
+            
+            # Generar patch (IGUAL QUE DEMO.PY - 6 parámetros)
+            img_patch, img2bb_trans = generate_patch_image(
+                frame, processed_bbox, False, 1.0, 0.0, False
+            )
+            
+            # Inferencia - obtener output completo (x, y, z_relative)
+            output = self.pose_engine.infer(img_patch)
+            if output is None:
+                return None
+            
+            # Post-procesamiento PARCIAL (solo x, y - conservar z original)
+            pose_3d = output[0].copy()  # Primer batch - copia para no modificar original
+            
+            # Desnormalizar SOLO coordenadas x, y (igual que demo.py)
+            pose_3d[:, 0] = pose_3d[:, 0] / cfg.output_shape[1] * cfg.input_shape[1]
+            pose_3d[:, 1] = pose_3d[:, 1] / cfg.output_shape[0] * cfg.input_shape[0]
+            
+            # Transformación inversa para x, y (igual que demo.py)
+            pose_3d_xy1 = np.concatenate(
+                (pose_3d[:, :2], np.ones_like(pose_3d[:, :1])), 1)
+            img2bb_trans_001 = np.concatenate(
+                (img2bb_trans, np.array([0, 0, 1]).reshape(1, 3)))
+            pose_3d[:, :2] = np.dot(np.linalg.inv(
+                img2bb_trans_001), pose_3d_xy1.transpose(1, 0)).transpose(1, 0)[:, :2]
+            
+            # IMPORTANTE: NO tocar pose_3d[:, 2] - conservar z_relative del modelo
+            
+            return pose_3d  # (x, y, z_relative)
+            
+        except Exception as e:
+            logger.warning(f"Error obteniendo pose con profundidad relativa: {e}")
+            return None
 
 def draw_pose_robust(image: np.ndarray, pose_2d: np.ndarray, color: Tuple[int, int, int] = (0, 255, 0)):
     """Dibujar pose robustamente (igual que demo.py con vis_keypoints)"""
