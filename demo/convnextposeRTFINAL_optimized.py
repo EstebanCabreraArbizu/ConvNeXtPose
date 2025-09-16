@@ -101,9 +101,19 @@ class OptimizedProcessor:
                 backend=self.config['backend']
             )
             
-            # RootNet simple wrapper
-            logger.info("📦 Loading RootNet...")
-            self.rootnet = SimpleRootNetWrapper()
+            # RootNet TFLite optimizado
+            logger.info("📦 Loading RootNet TFLite...")
+            try:
+                from rootnet_tflite_wrapper import RootNetTFLiteWrapper
+                self.rootnet = RootNetTFLiteWrapper(model_variant='size')  # Usar modelo 'size' (más rápido)
+                if self.rootnet.backbone_available:
+                    logger.info("✅ RootNet TFLite cargado exitosamente")
+                else:
+                    logger.warning("⚠️ RootNet TFLite no disponible, usando fallback")
+                    self.rootnet = SimpleRootNetWrapper()
+            except ImportError:
+                logger.warning("⚠️ RootNet TFLite wrapper no encontrado, usando fallback")
+                self.rootnet = SimpleRootNetWrapper()
             
             logger.info("✅ All components initialized successfully")
             
@@ -134,8 +144,22 @@ class OptimizedProcessor:
             if pose_2d is None:
                 return None
             
-            # Depth estimation simple
-            depth = self._estimate_depth_simple(bbox)
+            # Depth estimation usando RootNet TFLite real
+            x1, y1, x2, y2 = bbox
+            x1 = max(0, x1)
+            y1 = max(0, y1)
+            x2 = min(frame.shape[1], x2)
+            y2 = min(frame.shape[0], y2)
+            crop = frame[y1:y2, x1:x2]
+            
+            depth = None
+            if crop.size > 0:
+                # Usar RootNet TFLite si está disponible
+                if hasattr(self.rootnet, 'backbone_available') and self.rootnet.backbone_available:
+                    depth = self.rootnet.predict_depth(crop, bbox, use_analysis=True)
+                else:
+                    # Fallback a estimación simple
+                    depth = self.rootnet.predict_depth(crop, bbox)
             
             pose_3d = None
             if depth:
@@ -246,9 +270,10 @@ class SimpleRootNetWrapper:
     
     def __init__(self):
         self.available = False
+        self.backbone_available = False  # Compatibilidad con TFLite wrapper
         
-    def predict_depth(self, img_patch, bbox, focal=[1500, 1500]):
-        """Fallback simple de profundidad"""
+    def predict_depth(self, img_patch, bbox, focal=[1500, 1500], use_analysis=False):
+        """Fallback simple de profundidad con interfaz compatible"""
         x1, y1, x2, y2 = bbox
         bbox_height = y2 - y1
         
