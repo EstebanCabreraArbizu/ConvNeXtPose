@@ -104,6 +104,7 @@ model = DataParallel(model).cuda()
 # Esto permitirá cargar los pesos que coinciden e ignorar los que no
 model.load_state_dict(ckpt['network'])
 model.eval()
+
 print("Modelo cargado exitosamente")
 sd = model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict()
 # Create export directory if it doesn't exist

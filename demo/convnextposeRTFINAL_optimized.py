@@ -313,11 +313,13 @@ def visualize_pose_complete(frame, pose_2d, bbox, confidence, depth=None, is_3d=
         # Definir conexiones del esqueleto humano (ConvNeXtPose format para 18 joints)
         # Basado en main/summary.py del proyecto: skeleton para joint_num == 18
         skeleton_connections = [
-            (0, 7), (7, 8), (8, 9), (9, 10),          # head to hands
-            (8, 11), (11, 12), (12, 13),              # torso to right leg  
-            (8, 14), (14, 15), (15, 16),              # torso to left leg
-            (0, 1), (1, 2), (2, 3),                   # head to right arm
-            (0, 4), (4, 5), (5, 6)                    # head to left arm
+            # (hombro derecho, cadera derecha) , (hombro izquierdo, cadera izquierda), (superior, nariz), (nariz, cabeza)
+            (11, 4), (14, 1), (8, 9), (9, 10),          # pelvis to head
+            # (0, 7) pelvis -> centro
+            (8, 11), (11, 12), (12, 13),              # torso to right arm  
+            (8, 14), (14, 15), (15, 16),              # torso to left arm
+            (0, 1), (1, 2), (2, 3),                   # pelvis to left leg
+            (0, 4), (4, 5), (5, 6)                    # pelvis to right leg
         ]
         
         # Colores para diferentes partes del cuerpo (ConvNeXtPose joints)
