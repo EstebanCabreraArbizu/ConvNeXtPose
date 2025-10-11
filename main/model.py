@@ -35,15 +35,58 @@ class DeConv(nn.Sequential):
 
 class HeadNet(nn.Module):
 
-    def __init__(self, joint_num, in_channel):
-        self.inplanes = in_channel # 2048, 768
+    def __init__(self, joint_num, in_channel, head_cfg=None):
+        """
+        HeadNet configurable para soportar variantes XS/S (2-UP) y M/L (3-UP)
+        
+        Args:
+            joint_num: Número de articulaciones
+            in_channel: Canales de entrada del backbone (384 para XS, 768 para S, 1024 para M, 1536 para L)
+            head_cfg: Diccionario con configuración de head:
+                     - num_deconv_layers: 2 para XS/S, 3 para M/L
+                     - deconv_channels: Lista de canales intermedios
+                     - deconv_kernels: Lista de kernel sizes
+                     Si es None, usa configuración legacy (2-UP con cfg.depth)
+        """
+        self.inplanes = in_channel
         super(HeadNet, self).__init__()
-
-        self.deconv_layers_1 = DeConv(inplanes=self.inplanes,planes=cfg.depth, kernel_size = 3)
-        self.deconv_layers_2 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size = 3)
-        self.deconv_layers_3 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size = 3, up = False)
+        
+        # Si no se proporciona head_cfg, usar configuración legacy (backward compatibility)
+        if head_cfg is None:
+            # Legacy: 2 upsamples + 1 sin upsample (compatibilidad con XS/S antiguos)
+            self.deconv_layers_1 = DeConv(inplanes=self.inplanes, planes=cfg.depth, kernel_size=3)
+            self.deconv_layers_2 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size=3)
+            self.deconv_layers_3 = DeConv(inplanes=cfg.depth, planes=cfg.depth, kernel_size=3, up=False)
+            self.num_deconv = 3
+            self.final_channels = cfg.depth
+        else:
+            # Nueva configuración dinámica
+            num_deconv = head_cfg['num_deconv_layers']
+            channels = head_cfg['deconv_channels']
+            kernels = head_cfg['deconv_kernels']
+            
+            self.num_deconv = num_deconv
+            self.final_channels = channels[-1] if channels else cfg.depth
+            
+            # Crear capas dinámicamente
+            deconv_layers = []
+            in_ch = self.inplanes
+            
+            for i in range(num_deconv):
+                out_ch = channels[i] if i < len(channels) else cfg.depth
+                kernel = kernels[i] if i < len(kernels) else 3
+                # Todas las capas tienen up=True para upsampling completo
+                deconv_layers.append(
+                    DeConv(inplanes=in_ch, planes=out_ch, kernel_size=kernel, up=True)
+                )
+                in_ch = out_ch
+            
+            # Registrar capas dinámicamente
+            self.deconv_layers = nn.ModuleList(deconv_layers)
+        
+        # Capa final (siempre presente)
         self.final_layer = nn.Conv2d(
-            in_channels=cfg.depth,
+            in_channels=self.final_channels,
             out_channels=joint_num * cfg.depth_dim,
             kernel_size=1,
             stride=1,
@@ -52,11 +95,17 @@ class HeadNet(nn.Module):
         self.apply(self._init_weights)
 
     def forward(self, x):
-        x = self.deconv_layers_1(x)
-        x = self.deconv_layers_2(x)
-        x = self.deconv_layers_3(x)
+        # Si usa configuración legacy
+        if hasattr(self, 'deconv_layers_1'):
+            x = self.deconv_layers_1(x)
+            x = self.deconv_layers_2(x)
+            x = self.deconv_layers_3(x)
+        else:
+            # Nueva configuración dinámica
+            for deconv_layer in self.deconv_layers:
+                x = deconv_layer(x)
+        
         x = self.final_layer(x)
-
         return x
 
     def _init_weights(self, m):
@@ -118,12 +167,47 @@ class ConvNeXtPose(nn.Module):
             return loss_coord
 
 def get_pose_net(cfg, is_train, joint_num):
+    """
+    Crea el modelo ConvNeXtPose con la configuración especificada.
+    
+    Args:
+        cfg: Objeto de configuración con backbone_cfg, head_cfg, y variant
+        is_train: Si True, aplica dropout (0.1), sino dropout=0
+        joint_num: Número de articulaciones a predecir
+    
+    Returns:
+        ConvNeXtPose: Modelo completo (backbone + head)
+    """
     drop_rate = 0
     if is_train:
         drop_rate = 0.1
-    backbone = ConvNeXt_BN(depths=cfg.backbone_cfg[0], dims=cfg.backbone_cfg[1],drop_path_rate=drop_rate) 
-    head_net = HeadNet(joint_num, in_channel = cfg.backbone_cfg[1][-1])
-
-    model = ConvNeXtPose(backbone, joint_num, head =head_net)
+    
+    # Crear backbone
+    backbone = ConvNeXt_BN(
+        depths=cfg.backbone_cfg[0], 
+        dims=cfg.backbone_cfg[1],
+        drop_path_rate=drop_rate
+    ) 
+    
+    # Crear head con configuración específica de variante
+    head_net = HeadNet(
+        joint_num, 
+        in_channel=cfg.backbone_cfg[1][-1],  # Último canal del backbone
+        head_cfg=cfg.head_cfg  # None para legacy, dict para nuevas variantes
+    )
+    
+    # Ensamblar modelo completo
+    model = ConvNeXtPose(backbone, joint_num, head=head_net)
+    
+    # Logging de arquitectura
+    if hasattr(cfg, 'variant'):
+        print(f"📐 Arquitectura: ConvNeXtPose-{cfg.variant}")
+        print(f"   Backbone: {cfg.backbone_cfg[1][-1]} canales de salida")
+        if cfg.head_cfg:
+            print(f"   HeadNet: {cfg.head_cfg['num_deconv_layers']}-UP "
+                  f"({cfg.head_cfg['num_deconv_layers']} capas de upsampling)")
+        else:
+            print(f"   HeadNet: Legacy (2-UP + 1 sin upsampling)")
+    
     return model
 

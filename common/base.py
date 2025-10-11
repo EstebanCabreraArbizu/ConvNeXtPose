@@ -179,6 +179,8 @@ class Tester(Base):
         self.batch_generator = batch_generator
     
     def _make_model(self, test_epoch):
+        from nets.utils import remap_checkpoint_keys
+        
         self.test_epoch = test_epoch
         model_path = os.path.join(cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
         assert os.path.exists(model_path), 'Cannot find model at ' + model_path
@@ -188,17 +190,46 @@ class Tester(Base):
         self.logger.info("Creating graph...")
         model = get_pose_net(cfg, False, self.joint_num)
         model = DataParallel(model).cuda()
+        
+        # Load checkpoint
         ckpt = torch.load(model_path)
-        model.load_state_dict(ckpt['network'])
-        # model = model.cuda()                             ##uncmt for torch2onnx
-        # new_state_dict = OrderedDict()
-        # for k, v in ckpt['network'].items():
-        #     name = k[7:] # remove `module.`
-        #     new_state_dict[name] = v
-        # # load params
-        # model.load_state_dict(new_state_dict)            ##uncmt for torch2onnx
+        state_dict = ckpt['network']
+        
+        # Aplicar remapping si es necesario (para checkpoints de M/L del paper original)
+        # El remapping convierte formatos de checkpoint originales al formato actual
+        if hasattr(cfg, 'variant') and cfg.variant in ['M', 'L']:
+            self.logger.info(f"Aplicando checkpoint remapping para variante {cfg.variant}...")
+            # Intentar remapping si hay claves incompatibles
+            try:
+                model.load_state_dict(state_dict)
+                self.logger.info("✓ Checkpoint cargado sin necesidad de remapping")
+            except RuntimeError as e:
+                self.logger.warning(f"Detectadas claves incompatibles, aplicando remapping...")
+                # Extraer state dict sin 'module.' prefix
+                new_state_dict = OrderedDict()
+                for k, v in state_dict.items():
+                    if k.startswith('module.'):
+                        name = k[7:]  # remove 'module.'
+                    else:
+                        name = k
+                    new_state_dict[name] = v
+                
+                # Aplicar remapping a nivel de backbone si es necesario
+                remapped_dict = remap_checkpoint_keys(new_state_dict)
+                
+                # Intentar carga con state dict remapeado
+                try:
+                    model.module.load_state_dict(remapped_dict, strict=False)
+                    self.logger.info("✓ Checkpoint remapeado cargado exitosamente (strict=False)")
+                except Exception as e2:
+                    self.logger.error(f"❌ Error cargando checkpoint remapeado: {e2}")
+                    raise
+        else:
+            # Para XS/S, usar carga estándar
+            model.load_state_dict(state_dict)
+            self.logger.info("✓ Checkpoint cargado (modo estándar)")
+        
         model.eval()
-
         self.model = model
 
     def _evaluate(self, preds, result_save_path):

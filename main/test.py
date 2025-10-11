@@ -13,6 +13,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--gpu', type=str, dest='gpu_ids')
     parser.add_argument('--epochs', type=str, dest='model')
+    parser.add_argument('--variant', type=str, default=None, 
+                       choices=['XS', 'S', 'M', 'L'],
+                       help='Model variant to test (XS, S, M, L). If not specified, uses config.py default.')
     args = parser.parse_args()
 
     # test gpus
@@ -36,6 +39,15 @@ def parse_args():
 def main():
 
     args = parse_args()
+    
+    # Cargar configuración de variante si se especifica
+    if args.variant:
+        print(f"\n{'='*60}")
+        print(f"  Cargando configuración para ConvNeXtPose-{args.variant}")
+        print(f"{'='*60}")
+        cfg.load_variant_config(args.variant)
+        print()
+    
     cfg.set_args(args.gpu_ids)
     cudnn.fastest = True
     cudnn.benchmark = True
