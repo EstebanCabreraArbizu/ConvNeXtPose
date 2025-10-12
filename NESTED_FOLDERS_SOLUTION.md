@@ -136,8 +136,8 @@ KAGGLE_DATASET_PATH = '/kaggle/input/your-dataset-name'
 
 ### Caso 3: Sujetos con variantes de nombre
 ```
-✅ S9_ACT2_i6/      ← Prioridad 1
-✅ S9_ACT2_16/      ← Prioridad 2
+✅ S9_ACT2_16/      ← Prioridad 1 (más común)
+✅ S9_ACT2_16/      ← Prioridad 2 (alternativa)
 ✅ S9_ACT2/         ← Prioridad 3
 ✅ S9/              ← Prioridad 4
 ```
@@ -154,8 +154,8 @@ ConvNeXtPose/data/
     ├── Human36M.py                      ← Módulo original INTACTO
     ├── annotations -> /kaggle/input/.../annotations (1)/annotations  ← Nivel correcto
     ├── images/
-    │   ├── S9 -> /kaggle/input/.../S9_ACT2_i6
-    │   └── S11 -> /kaggle/input/.../S11_ACT2_i6
+    │   ├── S9 -> /kaggle/input/.../S9_ACT2_16
+    │   └── S11 -> /kaggle/input/.../S11_ACT2_16
     └── bbox_root -> /kaggle/input/.../Subject 9,11.../
 ```
 

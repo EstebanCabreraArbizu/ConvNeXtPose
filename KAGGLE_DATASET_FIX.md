@@ -8,7 +8,7 @@ El error `ModuleNotFoundError: No module named 'dataset'` ocurría porque el scr
 ❌ INCORRECTO (anterior):
 /kaggle/working/data/              ← Carpeta nueva con solo enlaces
   └── Human36M/                    
-      ├── images/ -> /kaggle/input/.../S9_ACT2_i6
+      ├── images/ -> /kaggle/input/.../S9_ACT2_16
       ├── annotations/ -> /kaggle/input/.../annotations (1)
       └── bbox_root/
   ❌ dataset.py NO EXISTE          ← Error: módulo faltante
@@ -28,8 +28,8 @@ El error `ModuleNotFoundError: No module named 'dataset'` ocurría porque el scr
       └── Human36M/
           ├── Human36M.py          ← Módulo original INTACTO
           ├── images/
-          │   ├── S9/ -> /kaggle/input/.../S9_ACT2_i6
-          │   └── S11/ -> /kaggle/input/.../S11_ACT2_i6
+          │   ├── S9/ -> /kaggle/input/.../S9_ACT2_16
+          │   └── S11/ -> /kaggle/input/.../S11_ACT2_16
           ├── annotations/ -> /kaggle/input/.../annotations (1)
           └── bbox_root/
 ```
@@ -54,7 +54,7 @@ KAGGLE_DATASET_PATH = '/kaggle/input/human36m-dataset'
 **Lo que hace:**
 - ✅ NO modifica `data/dataset.py` ni `data/Human36M/Human36M.py`
 - ✅ Crea enlaces simbólicos SOLO en `data/Human36M/images/`, `annotations/`, `bbox_root/`
-- ✅ Detecta automáticamente variantes de nombres (`S9_ACT2_i6`, `S9_ACT2`, `annotations (1)`)
+- ✅ Detecta automáticamente variantes de nombres (`S9_ACT2_16`, `S9_ACT2`, `annotations (1)`)
 
 ### 3. Verificar Estructura
 ```python

@@ -5,8 +5,8 @@
 Tu dataset en Kaggle tiene esta estructura:
 ```
 /kaggle/input/human36m-dataset/
-├── S9_ACT2_i6/          # Sujeto 9
-├── S11_ACT2_i6/         # Sujeto 11
+├── S9_ACT2_16/          # Sujeto 9
+├── S11_ACT2_16/         # Sujeto 11
 └── annotations (1)/     # Anotaciones con nombre diferente
 ```
 
