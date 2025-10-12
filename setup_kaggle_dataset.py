@@ -81,25 +81,41 @@ def setup_kaggle_structure(kaggle_input_path, convnextpose_root):
     # ==========================================
     print("\n📁 [1/3] Configurando annotations...")
     
-    # Buscar carpeta annotations (puede estar como "annotations (1)" o "annotations")
+    # Buscar carpeta annotations (puede estar como "annotations (1)/annotations" o "annotations")
     annotations_candidates = [
-        kaggle_input / 'annotations (1)',
-        kaggle_input / 'annotations',
-        kaggle_input / 'annotation',
+        kaggle_input / 'annotations (1)' / 'annotations',  # Caso anidado
+        kaggle_input / 'annotations (1)',                   # Caso directo
+        kaggle_input / 'annotations',                       # Caso simple
+        kaggle_input / 'annotation',                        # Variante
     ]
     
     annotations_src = None
     for candidate in annotations_candidates:
         if candidate.exists():
-            annotations_src = candidate
-            print(f"  ✓ Encontrado: {candidate.name}")
-            break
+            # Verificar que contiene archivos JSON (no es solo un contenedor vacío)
+            if candidate.is_dir():
+                json_files = list(candidate.glob('*.json'))
+                if json_files:
+                    annotations_src = candidate
+                    print(f"  ✓ Encontrado: {candidate.relative_to(kaggle_input)}")
+                    print(f"    ({len(json_files)} archivos JSON detectados)")
+                    break
+                else:
+                    print(f"  ⚠️  {candidate.name} existe pero está vacío, probando siguiente...")
+            else:
+                annotations_src = candidate
+                print(f"  ✓ Encontrado: {candidate.name}")
+                break
     
     if not annotations_src:
-        print(f"  ❌ No se encontró carpeta annotations en {kaggle_input}")
+        print(f"  ❌ No se encontró carpeta annotations válida en {kaggle_input}")
         print(f"     Contenido de {kaggle_input}:")
         for item in kaggle_input.iterdir():
             print(f"       - {item.name}")
+            if item.is_dir() and 'annotation' in item.name.lower():
+                print(f"         Contenido de {item.name}:")
+                for subitem in item.iterdir():
+                    print(f"           • {subitem.name}")
         return False
     
     annotations_dst = h36m_dir / 'annotations'
@@ -139,6 +155,9 @@ def setup_kaggle_structure(kaggle_input_path, convnextpose_root):
     print("\n📦 [3/3] Configurando bbox_root...")
     
     bbox_candidates = [
+        # Buscar la carpeta con el archivo bbox_root_human36m_output.json
+        kaggle_input / 'Bounding box + Root joint coordinate-20230423T040706Z-001' / 'Bounding box + Root joint coordinate' / 'Human3.6M' / 'Subject 9,11 (trained on subject 1,5,6,7,8)',
+        kaggle_input / 'bbox_root' / 'Subject 9,11 (trained on subject 1,5,6,7,8)',
         kaggle_input / 'bbox_root',
         kaggle_input / 'Bounding box + Root joint coordinate-20230423T040706Z-001',
     ]
@@ -146,12 +165,27 @@ def setup_kaggle_structure(kaggle_input_path, convnextpose_root):
     bbox_src = None
     for candidate in bbox_candidates:
         if candidate.exists():
-            bbox_src = candidate
-            print(f"  ✓ Encontrado: {candidate.name}")
-            break
+            # Verificar que contiene el archivo JSON esperado
+            if (candidate / 'bbox_root_human36m_output.json').exists():
+                bbox_src = candidate
+                print(f"  ✓ Encontrado: {candidate.relative_to(kaggle_input)}")
+                print(f"    (con bbox_root_human36m_output.json)")
+                break
+            elif candidate.is_dir():
+                # Si es un directorio, buscar dentro
+                json_file = list(candidate.rglob('bbox_root_human36m_output.json'))
+                if json_file:
+                    bbox_src = json_file[0].parent
+                    print(f"  ✓ Encontrado: {bbox_src.relative_to(kaggle_input)}")
+                    print(f"    (bbox_root_human36m_output.json detectado)")
+                    break
     
     if bbox_src:
         bbox_dst = h36m_dir / 'bbox_root'
+        # Si bbox_root ya existe en el repo, crear subdirectorio
+        if bbox_dst.exists() and not bbox_dst.is_symlink():
+            bbox_dst = bbox_dst / 'Subject 9,11 (trained on subject 1,5,6,7,8)'
+            bbox_dst.parent.mkdir(parents=True, exist_ok=True)
         create_symlink_safe(bbox_src, bbox_dst)
     else:
         print("  ⚠️  No se encontró bbox_root (opcional)")

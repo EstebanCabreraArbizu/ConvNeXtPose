@@ -115,6 +115,32 @@ output_dir / 'Human36M' / 'images' / 'S9'
 project_root / 'data' / 'Human36M' / 'images' / 'S9'
 ```
 
+## 📁 Manejo de Carpetas Anidadas (NUEVO)
+
+El script ahora detecta automáticamente carpetas anidadas:
+
+### Caso: `annotations (1)/annotations/`
+```
+❌ Problema: annotations (1) contiene otra carpeta annotations dentro
+✅ Solución: El script busca automáticamente el nivel más profundo con archivos JSON
+
+Búsqueda automática:
+1. annotations (1)/annotations/  ← Detecta archivos JSON aquí ✓
+2. annotations (1)/               ← Vacío, se salta
+3. annotations/                   ← Alternativa
+```
+
+### Caso: `bbox_root` con estructura compleja
+```
+Bounding box + Root joint coordinate.../
+  └── Bounding box + Root joint coordinate/
+      └── Human3.6M/
+          └── Subject 9,11 (trained on subject 1,5,6,7,8)/
+              └── bbox_root_human36m_output.json  ← Detectado automáticamente
+```
+
+El script usa `rglob()` para buscar recursivamente el archivo correcto.
+
 ## ⚠️ Si Ya Ejecutaste la Versión Anterior
 
 **Reinicia el entorno de Kaggle** o elimina la carpeta conflictiva:
