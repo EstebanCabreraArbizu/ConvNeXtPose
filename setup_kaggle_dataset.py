@@ -39,23 +39,25 @@ def create_symlink_safe(src, dst):
         return False
 
 
-def setup_kaggle_structure(kaggle_input_path, output_data_dir):
+def setup_kaggle_structure(kaggle_input_path, convnextpose_root):
     """
     Configura la estructura de datos esperada por ConvNeXtPose
-    usando enlaces simbólicos a los datos de Kaggle.
+    usando enlaces simbólicos SOLO dentro de data/Human36M/.
+    
+    ⚠️ IMPORTANTE: NO reemplaza la carpeta data/, solo enlaza contenido en data/Human36M/
     
     Args:
         kaggle_input_path: Ruta al dataset montado en Kaggle (ej: /kaggle/input/human36m-dataset)
-        output_data_dir: Ruta donde crear la estructura (ej: /kaggle/working/data)
+        convnextpose_root: Ruta raíz del proyecto ConvNeXtPose (ej: /kaggle/working/ConvNeXtPose)
     """
     kaggle_input = Path(kaggle_input_path)
-    output_dir = Path(output_data_dir)
+    project_root = Path(convnextpose_root)
     
     print("\n" + "="*70)
     print("  Configuración de Dataset Human3.6M para ConvNeXtPose")
     print("="*70)
-    print(f"📂 Entrada Kaggle: {kaggle_input}")
-    print(f"📂 Salida:         {output_dir}")
+    print(f"📂 Dataset Kaggle:     {kaggle_input}")
+    print(f"📂 Proyecto ConvNeXt:  {project_root}")
     print()
     
     # Verificar que el input existe
@@ -64,10 +66,15 @@ def setup_kaggle_structure(kaggle_input_path, output_data_dir):
         print("   Verifica que el dataset esté montado en Kaggle")
         return False
     
-    # Crear estructura base
-    h36m_dir = output_dir / 'Human36M'
-    h36m_dir.mkdir(parents=True, exist_ok=True)
-    print(f"✓ Creado directorio base: {h36m_dir}")
+    # Verificar que existe data/Human36M/ en el proyecto
+    h36m_dir = project_root / 'data' / 'Human36M'
+    if not h36m_dir.exists():
+        print(f"❌ Error: No se encuentra {h36m_dir}")
+        print(f"   Verifica que estás en el directorio correcto del proyecto")
+        return False
+    
+    print(f"✓ Directorio del proyecto encontrado: {h36m_dir}")
+    print(f"✓ Manteniendo módulos Python originales en {project_root / 'data'}")
     
     # ==========================================
     # 1. CONFIGURAR CARPETA ANNOTATIONS
@@ -99,14 +106,14 @@ def setup_kaggle_structure(kaggle_input_path, output_data_dir):
     create_symlink_safe(annotations_src, annotations_dst)
     
     # ==========================================
-    # 2. CONFIGURAR CARPETAS DE SUJETOS
+    # 2. CONFIGURAR CARPETAS DE SUJETOS (IMAGES)
     # ==========================================
     print("\n👥 [2/3] Configurando sujetos S9 y S11...")
     
-    # Buscar S9_ACT2_16 o similares
+    # Buscar S9_ACT2_i6 o similares variantes
     subject_patterns = {
-        'S9': ['S9_ACT2_16', 'S9_ACT2', 'S9'],
-        'S11': ['S11_ACT2_16', 'S11_ACT2', 'S11']
+        'S9': ['S9_ACT2_i6', 'S9_ACT2_16', 'S9_ACT2', 'S9'],
+        'S11': ['S11_ACT2_i6', 'S11_ACT2_16', 'S11_ACT2', 'S11']
     }
     
     images_dir = h36m_dir / 'images'
@@ -168,21 +175,27 @@ def setup_kaggle_structure(kaggle_input_path, output_data_dir):
             print(f"  📁 {rel_path}/")
     
     print("\n" + "="*70)
-    print("  📝 Siguiente Paso: Configurar Variable de Entorno")
+    print("  ✅ LISTO - NO necesitas configurar CONVNEXPOSE_DATA_DIR")
     print("="*70)
-    print(f"\nEn tu notebook de Kaggle, ejecuta:")
-    print(f"\n  import os")
-    print(f"  os.environ['CONVNEXPOSE_DATA_DIR'] = '{output_dir}'")
-    print(f"\nLuego puedes ejecutar el testing normalmente:")
-    print(f"  !cd ConvNeXtPose/main && python test.py --gpu 0 --epochs 70 --variant L")
+    print(f"\n✅ Los módulos Python originales están intactos en:")
+    print(f"   {project_root / 'data' / 'dataset.py'}")
+    print(f"   {project_root / 'data' / 'Human36M' / 'Human36M.py'}")
+    print(f"\n✅ El dataset de Kaggle está enlazado en:")
+    print(f"   {h36m_dir / 'images'}")
+    print(f"   {h36m_dir / 'annotations'}")
+    print(f"   {h36m_dir / 'bbox_root'} (si existe)")
+    print(f"\n🚀 Puedes ejecutar el testing directamente:")
+    print(f"   %cd {project_root / 'main'}")
+    print(f"   !python test.py --gpu 0 --epochs 70 --variant L")
     print()
     
     return True
 
 
-def verify_structure(data_dir):
+def verify_structure(convnextpose_root):
     """Verifica que la estructura esté correctamente configurada"""
-    data_path = Path(data_dir)
+    project_root = Path(convnextpose_root)
+    data_path = project_root / 'data'
     h36m_path = data_path / 'Human36M'
     
     print("\n" + "="*70)
@@ -190,11 +203,12 @@ def verify_structure(data_dir):
     print("="*70)
     
     checks = {
-        'Human36M directory': h36m_path.exists(),
-        'annotations folder': (h36m_path / 'annotations').exists(),
-        'images folder': (h36m_path / 'images').exists(),
-        'S9 subject': (h36m_path / 'images' / 'S9').exists(),
-        'S11 subject': (h36m_path / 'images' / 'S11').exists(),
+        'data/dataset.py': (data_path / 'dataset.py').exists(),
+        'data/Human36M/Human36M.py': (h36m_path / 'Human36M.py').exists(),
+        'data/Human36M/annotations': (h36m_path / 'annotations').exists(),
+        'data/Human36M/images': (h36m_path / 'images').exists(),
+        'data/Human36M/images/S9': (h36m_path / 'images' / 'S9').exists(),
+        'data/Human36M/images/S11': (h36m_path / 'images' / 'S11').exists(),
     }
     
     all_ok = True
@@ -205,11 +219,13 @@ def verify_structure(data_dir):
             all_ok = False
     
     if (h36m_path / 'bbox_root').exists():
-        print(f"  ✓ bbox_root folder (optional)")
+        print(f"  ✓ data/Human36M/bbox_root (optional)")
     
     print()
     if all_ok:
         print("  ✅ Estructura verificada correctamente")
+        print("  ✅ Módulos Python intactos en data/")
+        print("  ✅ Dataset enlazado en data/Human36M/")
     else:
         print("  ⚠️  Algunos elementos faltan - revisa la configuración")
     
@@ -223,15 +239,15 @@ def main():
         epilog="""
 Ejemplos de uso:
 
-  # En Kaggle notebook:
-  !python setup_kaggle_dataset.py --kaggle-input /kaggle/input/human36m-v1
+  # En Kaggle notebook (desde /kaggle/working/ConvNeXtPose):
+  !python setup_kaggle_dataset.py --kaggle-input /kaggle/input/human36m-dataset
   
-  # Especificar directorio de salida personalizado:
-  !python setup_kaggle_dataset.py --kaggle-input /kaggle/input/human36m-v1 \\
-                                   --output /kaggle/working/custom_data
+  # Especificar directorio del proyecto:
+  !python setup_kaggle_dataset.py --kaggle-input /kaggle/input/human36m-dataset \\
+                                   --project-root /kaggle/working/ConvNeXtPose
   
   # Verificar estructura existente:
-  !python setup_kaggle_dataset.py --verify /kaggle/working/data
+  !python setup_kaggle_dataset.py --verify /kaggle/working/ConvNeXtPose
         """
     )
     
@@ -242,16 +258,16 @@ Ejemplos de uso:
     )
     
     parser.add_argument(
-        '--output',
+        '--project-root',
         type=str,
-        default='/kaggle/working/data',
-        help='Directorio donde crear la estructura (default: /kaggle/working/data)'
+        default='.',
+        help='Ruta raíz del proyecto ConvNeXtPose (default: directorio actual)'
     )
     
     parser.add_argument(
         '--verify',
         type=str,
-        help='Solo verificar una estructura existente sin crear enlaces'
+        help='Solo verificar una estructura existente. Especifica la ruta del proyecto ConvNeXtPose.'
     )
     
     args = parser.parse_args()
@@ -267,12 +283,12 @@ Ejemplos de uso:
         print("\n❌ Error: Se requiere --kaggle-input o --verify")
         sys.exit(1)
     
-    success = setup_kaggle_structure(args.kaggle_input, args.output)
+    success = setup_kaggle_structure(args.kaggle_input, args.project_root)
     
     if success:
         print("\n🎉 Setup completado exitosamente!")
         print("\n💡 Tip: Ejecuta con --verify para verificar la estructura:")
-        print(f"   !python setup_kaggle_dataset.py --verify {args.output}")
+        print(f"   !python setup_kaggle_dataset.py --verify {args.project_root}")
     
     sys.exit(0 if success else 1)
 
