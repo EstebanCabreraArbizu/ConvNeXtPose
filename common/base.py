@@ -182,8 +182,18 @@ class Tester(Base):
         from nets.utils import remap_checkpoint_keys
         
         self.test_epoch = test_epoch
-        model_path = os.path.join(cfg.model_dir, 'snapshot_%d.pth.tar' % self.test_epoch)
-        assert os.path.exists(model_path), 'Cannot find model at ' + model_path
+        # buscar snapshot en formato .pth.tar o .pth (algunos checkpoints en Kaggle vienen como .pth zip)
+        default_name = 'snapshot_%d.pth.tar' % self.test_epoch
+        alt_name = 'snapshot_%d.pth' % self.test_epoch
+        model_path = os.path.join(cfg.model_dir, default_name)
+        if not os.path.exists(model_path):
+            alt_path = os.path.join(cfg.model_dir, alt_name)
+            if os.path.exists(alt_path):
+                model_path = alt_path
+            else:
+                raise FileNotFoundError(
+                    'Cannot find checkpoint: tried %s and %s' % (default_name, alt_name)
+                )
         self.logger.info('Load checkpoint from {}'.format(model_path))
         
         # prepare network
