@@ -103,10 +103,10 @@ def setup_kaggle_structure(kaggle_input_path, output_data_dir):
     # ==========================================
     print("\n👥 [2/3] Configurando sujetos S9 y S11...")
     
-    # Buscar S9_ACT2_i6 o similares
+    # Buscar S9_ACT2_16 o similares
     subject_patterns = {
-        'S9': ['S9_ACT2_i6', 'S9_ACT2', 'S9'],
-        'S11': ['S11_ACT2_i6', 'S11_ACT2', 'S11']
+        'S9': ['S9_ACT2_16', 'S9_ACT2', 'S9'],
+        'S11': ['S11_ACT2_16', 'S11_ACT2', 'S11']
     }
     
     images_dir = h36m_dir / 'images'
