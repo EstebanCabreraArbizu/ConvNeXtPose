@@ -31,7 +31,7 @@ MODEL_CONFIGS = {
     },
     'S': {
         'depths': [3, 3, 27, 3],
-        'dims': [96, 192, 384, 768],
+        'dims': [48, 96, 192, 384],  # ✅ CORREGIDO: igual que XS pero con depths=[3,3,27,3]
         'head_cfg': {
             'num_deconv_layers': 2,  # 2-UP: solo 2 capas con upsampling
             'deconv_channels': [256, 256],
@@ -39,9 +39,9 @@ MODEL_CONFIGS = {
         },
         'params': 50.0,
         'gflops': 8.7,
-        'expected_mpjpe': 48.0,  # mm en Protocol 2
+        'expected_mpjpe': 45.0,  # mm en Protocol 2 (estimado, confirmado por checkpoint real)
         'expected_pa_mpjpe': 33.2,  # mm en Protocol 1
-        'description': 'Small - Balance entre velocidad y precisión'
+        'description': 'Small - Balance entre velocidad y precisión (dims=[48,96,192,384], depths=[3,3,27,3])'
     },
     'M': {
         'depths': [3, 3, 27, 3],
