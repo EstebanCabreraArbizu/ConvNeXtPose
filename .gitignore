@@ -24,3 +24,4 @@ test*
 calibration*
 *.onnx
 *.tflite
+*tmp*
