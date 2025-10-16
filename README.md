@@ -4,6 +4,43 @@
 
 This repo is official **[PyTorch](https://pytorch.org)** implementation of **[ConvNeXtPose: A Fast Accurate Method for 3D Human Pose Estimation and its AR Fitness Application in Mobile Devices(IEEE Access 2023)](https://ieeexplore.ieee.org/document/10288440/metrics)**.
 
+---
+
+## 📚 Documentación Actualizada (Octubre 2025)
+
+**IMPORTANTE:** Este repositorio ha sido actualizado con documentación completa y verificada.
+
+### **🎯 Documentos Principales:**
+
+1. **[GUIA_COMPLETA_ACTUALIZADA.md](GUIA_COMPLETA_ACTUALIZADA.md)** ⭐ - Guía completa con todo verificado
+   - Arquitecturas reales de checkpoints
+   - Configuraciones correctas por modelo (XS, S, M, L)
+   - Solución a errores comunes
+   - Scripts de verificación
+
+2. **[INDICE_DOCUMENTACION.md](INDICE_DOCUMENTACION.md)** - Índice completo de toda la documentación
+
+3. **[ANALISIS_UPSAMPLING_MODULES.md](ANALISIS_UPSAMPLING_MODULES.md)** - Análisis técnico detallado
+
+### **🚀 Inicio Rápido:**
+
+- **Para Kaggle:** Ver `KAGGLE_EXECUTION_GUIDE.md`
+- **Para Ubuntu:** Ver `UBUNTU_QUICKSTART.md`
+- **Para Troubleshooting:** Ver sección "Problemas Comunes" en `GUIA_COMPLETA_ACTUALIZADA.md`
+
+### **🔍 Hallazgos Importantes:**
+
+| Modelo | Backbone | cfg.head_cfg | Params | MPJPE (Protocol 2) |
+|--------|----------|-------------|--------|-------------------|
+| XS | Atto: (2,2,6,2), (40,80,160,320) | `[128, 128, 128]` | 3.53M | 56.61mm |
+| S | Femto-L: (3,3,9,3), (48,96,192,384) | `[256, 256, 256]` | 7.45M | 51.80mm |
+| M | Femto-L: (3,3,9,3), (48,96,192,384) | `[256, 256, 256]` | 7.60M | 51.05mm |
+| L | Femto-L: (3,3,9,3), (48,96,192,384) | `[512, 512, 512]` | 8.39M | 49.75mm |
+
+**Nota:** Modelos S, M y L comparten el mismo backbone Femto-L. La diferencia está en los canales del head.
+
+---
+
 ## Dependencies
 * [PyTorch](https://pytorch.org)
 * [CUDA](https://developer.nvidia.com/cuda-downloads)

@@ -1,7 +1,32 @@
 # 🔬 Análisis Completo: UpSampling Modules en ConvNeXtPose
 
-**Fecha:** 15 de Octubre, 2025  
+**Fecha:** 15-16 de Octubre, 2025  
+**Estado:** ✅ Verificado con checkpoints reales  
 **Análisis solicitado:** Verificar configuración de upsampling en celda de código
+
+---
+
+## 📋 Resumen Ejecutivo
+
+### **Hallazgos Clave:**
+
+1. **TODOS los modelos (XS, S, M, L) usan 3 capas de deconvolución en checkpoints reales**
+2. **El paper indica "2-UP" para XS y S, pero implementación tiene 3 capas**
+3. **Modo Legacy:** 3 capas creadas, solo 2 con upsampling real (última tiene up=False)
+4. **Modo Explícito:** 3 capas todas con upsampling (up=True)
+
+### **Verificación de Checkpoints:**
+
+| Modelo | Capas Deconv | Canales por Capa | Params | Coincide con Paper |
+|--------|--------------|------------------|--------|-------------------|
+| XS | 3 | [320, 128, 128] | 3.53M | ✅ Params, ⚠️ Upsampling (paper: 2-UP) |
+| S | 3 | [384, 256, 256] | 7.45M | ✅ Params, ⚠️ Upsampling (paper: 2-UP) |
+| M | 3 | [384, 256, 256] | 7.60M | ✅ Completo |
+| L | 3 | [384, 512, 512] | 8.39M | ✅ Completo |
+
+### **Recomendación:**
+
+Tu configuración con `cfg.head_cfg = None` y `cfg.depth = 512` es **CORRECTA** para modelo L.
 
 ---
 
@@ -15,7 +40,11 @@ cfg.depth = 512
 cfg.head_cfg = None
 ```
 
-**Está configurada para usar: 3 capas de upsampling (3-UP) con modo LEGACY**
+**Está configurada para usar: 3 capas de deconvolución (modo LEGACY)**
+- 2 capas con upsampling real (deconv_layers_1 y 2)
+- 1 capa sin upsampling (deconv_layers_3, up=False)
+- Funcionalmente: "2-UP + 1 transform"
+- Nomenclatura del paper: "3-UP, 512"
 
 ---
 
