@@ -24,4 +24,7 @@ test*
 calibration*
 *.onnx
 *.tflite
+*.pth
 *tmp*
+*.ipynb
+.github/
